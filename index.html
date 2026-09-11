@@ -922,57 +922,100 @@
       // 6. TZN 編集：Editor ウィジェット
       // ----------------------------------------------------------
 
+      // レイヤーに指定フィールドが存在するか
+      function layerHasField(featureLayer, fieldName) {
+
+        if (!fieldName || !featureLayer.fields) {
+          return false;
+        }
+
+        return featureLayer.fields.some(function (field) {
+          return field.name === fieldName;
+        });
+      }
+
+      function buildFormTemplate(featureLayer) {
+
+        const elements = [];
+
+        // 読み取り専用にする項目
+        // editableExpression には Arcade 式の名前を指定する
+        const readOnly = [
+          { name: state.resolved.gridId, label: "グリッド ID" },
+          { name: state.resolved.fieldId, label: "圃場" },
+          { name: state.resolved.pdv, label: "PDV (mg/m²)" }
+        ];
+
+        // TZN は編集可能
+        if (layerHasField(featureLayer, state.resolved.tzn)) {
+          elements.push({
+            type: "field",
+            fieldName: state.resolved.tzn,
+            label: "TZN（0～5）",
+            description: "0 は散布なし"
+          });
+        }
+
+        readOnly.forEach(function (item) {
+          if (layerHasField(featureLayer, item.name)) {
+            elements.push({
+              type: "field",
+              fieldName: item.name,
+              label: item.label,
+              editableExpression: "expr-readonly"
+            });
+          }
+        });
+
+        if (!elements.length) {
+          return null;
+        }
+
+        return {
+          title: "処方マップセルの編集",
+          expressionInfos: [{
+            name: "expr-readonly",
+            title: "読み取り専用",
+            expression: "false",
+            returnType: "boolean"
+          }],
+          elements: elements
+        };
+      }
+
       function setupEditor(featureLayer) {
 
-        if (state.editor) {
+        if (state.editorExpand) {
           view.ui.remove(state.editorExpand);
+          state.editorExpand.destroy();
+          state.editorExpand = null;
+        }
+
+        if (state.editor) {
           state.editor.destroy();
           state.editor = null;
         }
 
+        const layerInfo = {
+          layer: featureLayer,
+          enabled: true,
+          addEnabled: false,
+          updateEnabled: true,
+          deleteEnabled: false,
+          attributeUpdatesEnabled: true,
+          geometryUpdatesEnabled: false
+        };
+
+        // フォーム構成に失敗した場合は既定のフォームを使う
+        const formTemplate = buildFormTemplate(featureLayer);
+
+        if (formTemplate) {
+          layerInfo.formTemplate = formTemplate;
+        }
+
         state.editor = new Editor({
           view: view,
-          layerInfos: [{
-            layer: featureLayer,
-
-            // TZN のみ編集させ、他は読み取り専用にする
-            formTemplate: {
-              elements: [
-                {
-                  type: "field",
-                  fieldName: state.resolved.gridId,
-                  label: "グリッド ID",
-                  editableExpression: "false"
-                },
-                {
-                  type: "field",
-                  fieldName: state.resolved.fieldId,
-                  label: "圃場",
-                  editableExpression: "false"
-                },
-                {
-                  type: "field",
-                  fieldName: state.resolved.tzn,
-                  label: "TZN（0～5）",
-                  description: "0 は散布なし"
-                },
-                {
-                  type: "field",
-                  fieldName: state.resolved.pdv,
-                  label: "PDV (mg/m²)",
-                  description: "左側のパネルから圃場単位で編集します",
-                  editableExpression: "false"
-                }
-              ]
-            },
-
-            enabled: true,
-            addEnabled: false,
-            updateEnabled: true,
-            deleteEnabled: false,
-            attributeUpdatesEnabled: true,
-            geometryUpdatesEnabled: false
-          }]
+          layerInfos: [layerInfo]
         });
 
         state.editorExpand = new Expand({
