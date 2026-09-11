@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ISOXML 施肥設計アプリ V8</title>
+  <title>ISOXML 施肥設計アプリ V9</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -22,7 +22,7 @@
 
     #app {
       display: grid;
-      grid-template-columns: 390px 1fr;
+      grid-template-columns: 400px 1fr;
     }
 
     #panel {
@@ -149,6 +149,12 @@
       text-align: right;
     }
 
+    table.grid td.calc {
+      text-align: right;
+      background: #f8fafc;
+      color: #35566f;
+    }
+
     table.grid tr.total td {
       background: #eef2f6;
       font-weight: 600;
@@ -197,38 +203,26 @@
       color: #9ca3af;
     }
 
-    /* 選択モード切替 */
-    .select-mode {
+    /* 透過度スライダー */
+    .opacity-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
+      grid-template-columns: 1fr 44px;
+      gap: 8px;
+      align-items: center;
       margin-top: 6px;
     }
 
-    .select-mode button {
+    .opacity-row input[type="range"] {
+      width: 100%;
       margin: 0;
-      padding: 7px 4px;
+      padding: 0;
+    }
+
+    .opacity-row span {
       font-size: 12px;
-      background: #fff;
-      color: #1f2937;
-      border: 1px solid #c3ccd6;
-    }
-
-    .select-mode button:hover:not(.active) {
-      background: #eef5fb;
-      border-color: #007ac2;
-    }
-
-    .select-mode button.active {
-      background: #007ac2;
-      color: #fff;
-      border-color: #007ac2;
+      text-align: right;
+      color: #35566f;
       font-weight: 600;
-    }
-
-    .select-mode button.active.remove {
-      background: #b45309;
-      border-color: #b45309;
     }
 
     /* 統計タブ */
@@ -285,7 +279,7 @@
       padding-top: 5px;
     }
 
-    @media (max-width: 790px) {
+    @media (max-width: 800px) {
       #app {
         grid-template-columns: 1fr;
         grid-template-rows: auto 1fr;
@@ -304,7 +298,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V8a</h1>
+      <h1>ISOXML 施肥設計アプリ V9</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -331,6 +325,13 @@
         <select id="rxLayerSelect">
           <option value="">レイヤーを選択してください</option>
         </select>
+
+        <h3>レイヤーの透過度</h3>
+        <div class="opacity-row">
+          <input id="opacitySlider" type="range" min="0" max="100" step="5" value="100">
+          <span id="opacityValue">100%</span>
+        </div>
+
         <div id="layerStatus" class="info-box">未選択</div>
       </section>
 
@@ -348,22 +349,15 @@
       <section id="cellSection" class="section">
         <h2>5. TZN の編集</h2>
         <p class="small">
-          地図右上の作図ツールで矩形、多角形、フリーハンドの範囲を描き、
-          範囲内のセルを選択します。選択後、下のボタンで TZN を一括設定します。
+          地図右上の作図ツールで範囲を描くと、その中のセルを選択します。
+          矩形、多角形、フリーハンドに対応しています。
         </p>
-
-        <h3>範囲を描いたときの動作</h3>
-        <div class="select-mode" id="selectModeButtons">
-          <button type="button" id="modeAddBtn" class="active">選択に追加</button>
-          <button type="button" id="modeRemoveBtn">選択から除外</button>
-        </div>
-
         <div id="selectionInfo" class="info-box">セルが選択されていません。</div>
 
         <h3>TZN を設定</h3>
         <div class="tzn-buttons" id="tznButtons"></div>
 
-        <button id="selectionClearBtn" class="secondary">すべての選択を解除</button>
+        <button id="selectionClearBtn" class="secondary">すべて解除</button>
         <div id="cellStatus" class="info-box">レイヤーを選択すると利用できます。</div>
       </section>
 
@@ -377,10 +371,11 @@
         <table class="grid">
           <thead>
             <tr>
-              <th style="width:30px;">色</th>
-              <th style="width:34px;">TZN</th>
-              <th>PDV (mg/m²)</th>
-              <th style="width:52px;">セル数</th>
+              <th style="width:28px;">色</th>
+              <th style="width:30px;">TZN</th>
+              <th>PDV<br>(mg/m²)</th>
+              <th style="width:62px;">換算<br>(kg/10a)</th>
+              <th style="width:46px;">セル数</th>
             </tr>
           </thead>
           <tbody id="pdvTableBody"></tbody>
@@ -534,6 +529,20 @@
       };
 
       // ==========================================================
+      // 単位換算
+      //
+      //  1 kg/ha  = 100 mg/m²
+      //  1 kg/10a = 1000 mg/m²
+      // ==========================================================
+
+      const UNITS = {
+        // mg/m² から kg/ha
+        pdvToKgPerHa: 0.01,
+        // mg/m² から kg/10a
+        pdvToKgPer10a: 0.001
+      };
+
+      // ==========================================================
       // 共通ユーティリティ
       // ==========================================================
 
@@ -555,6 +564,8 @@
 
         layerSection: dom("layerSection"),
         rxLayerSelect: dom("rxLayerSelect"),
+        opacitySlider: dom("opacitySlider"),
+        opacityValue: dom("opacityValue"),
         layerStatus: dom("layerStatus"),
 
         fieldSection: dom("fieldSection"),
@@ -563,8 +574,6 @@
         fieldStatus: dom("fieldStatus"),
 
         cellSection: dom("cellSection"),
-        modeAddBtn: dom("modeAddBtn"),
-        modeRemoveBtn: dom("modeRemoveBtn"),
         selectionInfo: dom("selectionInfo"),
         tznButtons: dom("tznButtons"),
         selectionClearBtn: dom("selectionClearBtn"),
@@ -600,11 +609,8 @@
 
         // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
         selection: new globalThis.Map(),
-        // 範囲を描いたときの動作: "add" または "remove"
-        selectMode: "add",
         sketch: null,
         sketchExpand: null,
-        clickHandle: null,
 
         // 統計
         statsScope: "field"
@@ -1038,6 +1044,9 @@
           applyTznRenderer(state.rxLayer);
           setupSketch();
 
+          // 透過度スライダーを現在値に合わせる
+          syncOpacitySlider();
+
           const editable = Boolean(
             state.rxLayer.capabilities &&
             state.rxLayer.capabilities.operations &&
@@ -1073,6 +1082,32 @@
       }
 
       ui.rxLayerSelect.onchange = selectRxLayer;
+
+      // ----- 透過度 -----
+
+      // スライダーをレイヤーの現在値へ同期する
+      function syncOpacitySlider() {
+
+        if (!state.rxLayer) {
+          return;
+        }
+
+        const percent = Math.round((state.rxLayer.opacity || 0) * 100);
+
+        ui.opacitySlider.value = percent;
+        ui.opacityValue.textContent = percent + "%";
+      }
+
+      ui.opacitySlider.oninput = function () {
+
+        const percent = Number(ui.opacitySlider.value);
+
+        ui.opacityValue.textContent = percent + "%";
+
+        if (state.rxLayer) {
+          state.rxLayer.opacity = percent / 100;
+        }
+      };
 
       // TZN による色分け
       function applyTznRenderer(featureLayer) {
@@ -1262,6 +1297,7 @@
           view: view,
           layer: sketchLayer,
           creationMode: "single",
+          // 矩形、多角形、フリーハンド
           availableCreateTools: ["rectangle", "polygon", "freehandPolygon"],
           visibleElements: {
             selectionTools: {
@@ -1299,14 +1335,10 @@
 
         view.ui.add(state.sketchExpand, "top-right");
 
-        // セルをクリックして個別に選択、解除する
-        state.clickHandle = view.on("click", onMapClick);
-
         setStatus(
           ui.cellStatus,
           "地図右上の作図ツールから範囲を描いてください。\n" +
-          "矩形、多角形、フリーハンドに対応しています。\n" +
-          "セルをクリックすると個別に選択、解除できます。"
+          "矩形、多角形、フリーハンドに対応しています。"
         );
       }
 
@@ -1323,139 +1355,21 @@
           state.sketch = null;
         }
 
-        if (state.clickHandle) {
-          state.clickHandle.remove();
-          state.clickHandle = null;
-        }
-
         sketchLayer.removeAll();
-      }
-
-      // クリックしたセルの選択を切り替える
-      async function onMapClick(event) {
-
-        if (!state.rxLayer) {
-          return;
-        }
-
-        // 作図中はクリック選択を行わない
-        if (state.sketch && state.sketch.state === "active") {
-          return;
-        }
-
-        try {
-
-          const response = await view.hitTest(event, {
-            include: [state.rxLayer]
-          });
-
-          const hit = response.results.find(function (item) {
-            return item.graphic && item.graphic.layer === state.rxLayer;
-          });
-
-          if (!hit) {
-            return;
-          }
-
-          event.stopPropagation();
-
-          const objectId = hit.graphic.attributes[state.rxLayer.objectIdField];
-
-          // 選択済みなら解除する
-          if (state.selection.has(objectId)) {
-
-            state.selection.delete(objectId);
-
-            refreshSelectionGraphics();
-            updateSelectionInfo();
-
-            setStatus(ui.cellStatus, "1 件を選択から除外しました。");
-
-            return;
-          }
-
-          // 属性とジオメトリを取得して選択へ追加する
-          const query = state.rxLayer.createQuery();
-          query.objectIds = [objectId];
-          query.outFields = [
-            state.rxLayer.objectIdField,
-            state.resolved.fieldId,
-            state.resolved.tzn,
-            state.resolved.pdv
-          ];
-          query.returnGeometry = true;
-
-          const result = await state.rxLayer.queryFeatures(query);
-
-          if (!result.features.length) {
-            return;
-          }
-
-          addToSelection(result.features);
-
-          setStatus(ui.cellStatus, "1 件を選択に追加しました。");
-
-        } catch (error) {
-          console.error(error);
-          setStatus(ui.cellStatus, "取得に失敗しました: " + errorText(error), true);
-        }
       }
 
       // ----- 選択 -----
 
-      // 描画した範囲でセルを選択、または選択から除外する
+      // 描画した範囲でセルを選択
       async function selectByGeometry(geometry) {
 
         if (!state.rxLayer || !geometry) {
           return;
         }
 
-        const isRemove = state.selectMode === "remove";
-
         try {
 
           setStatus(ui.cellStatus, "範囲内のセルを取得中...");
-
-          // 除外モードでは選択済みのセルだけを対象にする
-          if (isRemove) {
-
-            if (!state.selection.size) {
-              setStatus(ui.cellStatus, "選択中のセルがありません。");
-              return;
-            }
-
-            const query = state.rxLayer.createQuery();
-            query.geometry = geometry;
-            query.spatialRelationship = "intersects";
-            query.outFields = [state.rxLayer.objectIdField];
-            query.returnGeometry = false;
-            query.num = CONFIG.queryLimit;
-
-            const result = await state.rxLayer.queryFeatures(query);
-
-            let removed = 0;
-
-            result.features.forEach(function (feature) {
-
-              const objectId = feature.attributes[state.rxLayer.objectIdField];
-
-              if (state.selection.delete(objectId)) {
-                removed += 1;
-              }
-            });
-
-            refreshSelectionGraphics();
-            updateSelectionInfo();
-
-            setStatus(
-              ui.cellStatus,
-              removed
-                ? removed + " 件を選択から除外しました。"
-                : "範囲内に選択中のセルがありません。"
-            );
-
-            return;
-          }
 
           const query = state.rxLayer.createQuery();
           query.geometry = geometry;
@@ -1485,7 +1399,7 @@
 
           setStatus(
             ui.cellStatus,
-            result.features.length + " 件を選択に追加しました。"
+            result.features.length + " 件を選択しました。"
           );
 
         } catch (error) {
@@ -1493,32 +1407,6 @@
           setStatus(ui.cellStatus, "取得に失敗しました: " + errorText(error), true);
         }
       }
-
-      // 範囲を描いたときの動作を切り替える
-      function setSelectMode(mode) {
-
-        state.selectMode = mode;
-
-        const isRemove = mode === "remove";
-
-        ui.modeAddBtn.className = isRemove ? "" : "active";
-        ui.modeRemoveBtn.className = isRemove ? "active remove" : "";
-
-        setStatus(
-          ui.cellStatus,
-          isRemove
-            ? "除外モードです。範囲を描くと、その中の選択済みセルを解除します。"
-            : "追加モードです。範囲を描くと、その中のセルを選択します。"
-        );
-      }
-
-      ui.modeAddBtn.onclick = function () {
-        setSelectMode("add");
-      };
-
-      ui.modeRemoveBtn.onclick = function () {
-        setSelectMode("remove");
-      };
 
       // 選択へ追加
       function addToSelection(features) {
@@ -1598,22 +1486,6 @@
         state.selection.clear();
         selectionLayer.removeAll();
         updateSelectionInfo();
-
-        // 追加モードへ戻す
-        if (ui.modeAddBtn) {
-          setSelectModeSilent("add");
-        }
-      }
-
-      // 状態表示を変えずにモードだけ戻す
-      function setSelectModeSilent(mode) {
-
-        state.selectMode = mode;
-
-        const isRemove = mode === "remove";
-
-        ui.modeAddBtn.className = isRemove ? "" : "active";
-        ui.modeRemoveBtn.className = isRemove ? "active remove" : "";
       }
 
       // ----- TZN 適用 -----
@@ -1754,7 +1626,7 @@
 
       ui.selectionClearBtn.onclick = function () {
         clearSelection();
-        setStatus(ui.cellStatus, "すべての選択を解除しました。");
+        setStatus(ui.cellStatus, "選択を解除しました。");
       };
 
       // ==========================================================
@@ -1785,6 +1657,11 @@
           input.step = "1";
           input.id = "pdvInput" + zone;
 
+          // 入力に応じて換算値を更新する
+          input.oninput = function () {
+            updateConvertedValue(zone);
+          };
+
           // TZN 0 は散布なしのため 0 固定
           if (zone === 0) {
             input.value = "0";
@@ -1794,17 +1671,53 @@
 
           valueCell.append(input);
 
+          // kg/10a への換算値
+          const convertedCell = document.createElement("td");
+          convertedCell.className = "calc";
+          convertedCell.id = "pdvConverted" + zone;
+          convertedCell.textContent = "—";
+
           const countCell = document.createElement("td");
           countCell.className = "cell-count";
           countCell.id = "pdvCount" + zone;
           countCell.textContent = "-";
 
-          row.append(colorCell, zoneCell, valueCell, countCell);
+          row.append(colorCell, zoneCell, valueCell, convertedCell, countCell);
           ui.pdvTableBody.append(row);
         }
       }
 
       buildPdvTable();
+
+      // PDV から kg/10a へ換算して表示する
+      //   1 kg/10a = 1000 mg/m²
+      function updateConvertedValue(zone) {
+
+        const input = dom("pdvInput" + zone);
+        const cell = dom("pdvConverted" + zone);
+
+        const raw = input.value.trim();
+
+        if (raw === "") {
+          cell.textContent = "—";
+          return;
+        }
+
+        const parsed = Number(raw);
+
+        if (!Number.isFinite(parsed)) {
+          cell.textContent = "—";
+          return;
+        }
+
+        cell.textContent = formatNumber(parsed * UNITS.pdvToKgPer10a, 2);
+      }
+
+      function updateAllConvertedValues() {
+        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
+          updateConvertedValue(zone);
+        }
+      }
 
       async function loadPdvForField(fieldId) {
 
@@ -1871,6 +1784,8 @@
               mixed.push(zone);
             }
           }
+
+          updateAllConvertedValues();
 
           ui.pdvApplyBtn.disabled = false;
           ui.pdvReloadBtn.disabled = false;
@@ -2135,6 +2050,7 @@
           if (zone === 0 || !info.count) {
             info.amount = null;
             info.rate = null;
+            info.rate10a = null;
             continue;
           }
 
@@ -2143,14 +2059,16 @@
           if (info.pdv === null || !cellArea) {
             info.amount = null;
             info.rate = null;
+            info.rate10a = null;
             continue;
           }
 
           // 散布量(kg) = PDV(mg/m²) × 面積(m²) ÷ 1,000,000
           info.amount = (info.pdv * info.area) / 1000000;
 
-          // 単位面積あたり(kg/ha) = PDV(mg/m²) × 0.01
-          info.rate = info.pdv * 0.01;
+          // 単位面積あたり
+          info.rate = info.pdv * UNITS.pdvToKgPerHa;
+          info.rate10a = info.pdv * UNITS.pdvToKgPer10a;
 
           totalAmount += info.amount;
           hasAmount = true;
@@ -2159,6 +2077,10 @@
         }
 
         const appliedArea = cellArea ? appliedCells * cellArea : null;
+
+        const averageRate = (hasAmount && appliedArea)
+          ? totalAmount / (appliedArea / 10000)
+          : null;
 
         return {
           label: label,
@@ -2169,9 +2091,8 @@
           appliedArea: appliedArea,
           appliedRatio: totalCells ? (appliedCells / totalCells) * 100 : 0,
           totalAmount: hasAmount ? totalAmount : null,
-          averageRate: (hasAmount && appliedArea)
-            ? totalAmount / (appliedArea / 10000)
-            : null,
+          averageRate: averageRate,
+          averageRate10a: averageRate !== null ? averageRate / 10 : null,
           minRate: rates.length ? Math.min.apply(null, rates) : null,
           maxRate: rates.length ? Math.max.apply(null, rates) : null,
           zones: zones
@@ -2201,6 +2122,8 @@
             ? formatNumber(summary.totalAmount, 1) + " kg" : "—", false],
           ["平均散布量", summary.averageRate !== null
             ? formatNumber(summary.averageRate, 1) + " kg/ha" : "—", false],
+          ["　（10a 換算）", summary.averageRate10a !== null
+            ? formatNumber(summary.averageRate10a, 2) + " kg/10a" : "—", false],
           ["最小・最大", (summary.minRate !== null)
             ? formatNumber(summary.minRate, 1) + " ～ " +
             formatNumber(summary.maxRate, 1) + " kg/ha" : "—", false]
@@ -2235,11 +2158,11 @@
         const head = document.createElement("thead");
         head.innerHTML =
           "<tr>" +
-          "<th style='width:26px;'></th>" +
-          "<th style='width:30px;'>TZN</th>" +
+          "<th style='width:24px;'></th>" +
+          "<th style='width:28px;'>TZN</th>" +
           "<th>面積<br>(ha)</th>" +
           "<th>割合</th>" +
-          "<th>散布量<br>(kg/ha)</th>" +
+          "<th>散布量<br>(kg/10a)</th>" +
           "<th>小計<br>(kg)</th>" +
           "</tr>";
 
@@ -2271,8 +2194,8 @@
 
           const rateCell = document.createElement("td");
           rateCell.className = "num";
-          rateCell.textContent = info.rate !== null
-            ? formatNumber(info.rate, 1) : "—";
+          rateCell.textContent = info.rate10a !== null
+            ? formatNumber(info.rate10a, 2) : "—";
 
           if (info.mixed) {
             rateCell.textContent += " *";
@@ -2305,8 +2228,10 @@
         totalRatioCell.className = "num";
         totalRatioCell.textContent = "100%";
 
-        const blankCell = document.createElement("td");
-        blankCell.textContent = "—";
+        const averageCell = document.createElement("td");
+        averageCell.className = "num";
+        averageCell.textContent = summary.averageRate10a !== null
+          ? formatNumber(summary.averageRate10a, 2) : "—";
 
         const totalAmountCell = document.createElement("td");
         totalAmountCell.className = "num";
@@ -2314,7 +2239,7 @@
           ? formatNumber(summary.totalAmount, 1) : "—";
 
         totalRow.append(emptyCell, totalAreaCell, totalRatioCell,
-          blankCell, totalAmountCell);
+          averageCell, totalAmountCell);
         body.append(totalRow);
 
         table.append(head, body);
@@ -2358,6 +2283,10 @@
           }
         });
 
+        const averageRate = (hasAmount && appliedArea)
+          ? totalAmount / (appliedArea / 10000)
+          : null;
+
         const list = document.createElement("dl");
         list.className = "summary";
 
@@ -2372,9 +2301,10 @@
             "%）" : "—", true],
           ["総散布量", hasAmount
             ? formatNumber(totalAmount, 1) + " kg" : "—", false],
-          ["平均散布量", (hasAmount && appliedArea)
-            ? formatNumber(totalAmount / (appliedArea / 10000), 1) + " kg/ha"
-            : "—", false]
+          ["平均散布量", averageRate !== null
+            ? formatNumber(averageRate, 1) + " kg/ha" : "—", false],
+          ["　（10a 換算）", averageRate !== null
+            ? formatNumber(averageRate / 10, 2) + " kg/10a" : "—", false]
         ];
 
         if (unsetFields) {
@@ -2413,7 +2343,7 @@
           "<th>圃場</th>" +
           "<th>面積<br>(ha)</th>" +
           "<th>散布量<br>(kg)</th>" +
-          "<th>平均<br>(kg/ha)</th>" +
+          "<th>平均<br>(kg/10a)</th>" +
           "</tr>";
 
         const body = document.createElement("tbody");
@@ -2437,8 +2367,8 @@
 
           const rateCell = document.createElement("td");
           rateCell.className = "num";
-          rateCell.textContent = summary.averageRate !== null
-            ? formatNumber(summary.averageRate, 1) : "—";
+          rateCell.textContent = summary.averageRate10a !== null
+            ? formatNumber(summary.averageRate10a, 2) : "—";
 
           row.append(nameCell, areaCell, amountCell, rateCell);
           body.append(row);
@@ -2463,8 +2393,8 @@
 
         const averageCell = document.createElement("td");
         averageCell.className = "num";
-        averageCell.textContent = (hasAmount && appliedArea)
-          ? formatNumber(totalAmount / (appliedArea / 10000), 1) : "—";
+        averageCell.textContent = averageRate !== null
+          ? formatNumber(averageRate / 10, 2) : "—";
 
         totalRow.append(labelCell, totalAreaCell, totalAmountCell, averageCell);
         body.append(totalRow);
