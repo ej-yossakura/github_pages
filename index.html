@@ -151,6 +151,35 @@
       color: #5f6b7a;
     }
 
+    /* 選択モード切替 */
+    .mode-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .mode-buttons button {
+      margin: 0;
+      padding: 7px 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #1f2937;
+      border: 1px solid #c3ccd6;
+    }
+
+    .mode-buttons button:hover:not(.active) {
+      background: #eef5fb;
+      border-color: #007ac2;
+    }
+
+    .mode-buttons button.active {
+      background: #007ac2;
+      color: #fff;
+      border-color: #007ac2;
+      font-weight: 600;
+    }
+
     /* TZN 選択ボタン */
     .tzn-buttons {
       display: grid;
@@ -292,8 +321,8 @@
       <section id="cellSection" class="section">
         <h2>5. TZN の編集</h2>
         <p class="small">
-          地図上のセルをクリックまたは矩形ドラッグで複数選択し、
-          TZN を一括で変更します。
+          地図上のセルを選択し、TZN を一括で変更します。
+          個別選択と矩形選択を切り替えできます。
         </p>
         <button id="cellEditToggle">TZN 編集モードを開始</button>
         <div id="cellStatus" class="info-box">TZN 編集モードは停止中です。</div>
@@ -343,9 +372,14 @@
   <!-- TZN 編集パネル（地図上に配置） -->
   <div id="cellEditorPanel" style="display:none;">
     <h3>TZN の一括編集</h3>
-    <p class="hint">
-      クリックで選択、Ctrl または Shift を押しながらクリックで追加選択。
-      Shift を押しながらドラッグで矩形選択します。
+
+    <label class="small">選択モード</label>
+    <div class="mode-buttons" id="modeButtons">
+      <button type="button" id="modeSingleBtn" class="active">個別選択</button>
+      <button type="button" id="modeRectBtn">矩形選択</button>
+    </div>
+    <p class="hint" id="modeHint">
+      セルをクリックで選択します。Ctrl キーを押しながらクリックすると追加選択します。
     </p>
 
     <div id="selectionInfo">セルが選択されていません。</div>
@@ -508,6 +542,9 @@
         cellStatus: dom("cellStatus"),
 
         cellEditorPanel: dom("cellEditorPanel"),
+        modeSingleBtn: dom("modeSingleBtn"),
+        modeRectBtn: dom("modeRectBtn"),
+        modeHint: dom("modeHint"),
         selectionInfo: dom("selectionInfo"),
         tznButtons: dom("tznButtons"),
         selectionClearBtn: dom("selectionClearBtn"),
@@ -537,6 +574,8 @@
 
         // TZN 編集
         cellEditMode: false,
+        // "single" または "rect"
+        selectMode: "single",
         handles: [],
         // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
         selection: new globalThis.Map(),
@@ -575,9 +614,15 @@
         listMode: "hide"
       });
 
+      // 矩形選択のラバーバンド用
+      const rubberBandLayer = new GraphicsLayer({
+        title: "矩形選択",
+        listMode: "hide"
+      });
+
       let map = new ArcGISMap({
         basemap: "topo-vector",
-        layers: [selectionLayer]
+        layers: [selectionLayer, rubberBandLayer]
       });
 
       const view = new MapView({
@@ -816,7 +861,9 @@
           await webmap.loadAll();
 
           selectionLayer.removeAll();
+          rubberBandLayer.removeAll();
           webmap.add(selectionLayer);
+          webmap.add(rubberBandLayer);
 
           view.map = webmap;
           map = webmap;
@@ -1318,15 +1365,15 @@
         return result.features;
       }
 
-      // クリックによる選択
+      // クリックによる個別選択
       async function onMapClickForTznEdit(event) {
 
         if (!state.cellEditMode || !state.rxLayer) {
           return;
         }
 
-        // 矩形ドラッグ中は処理しない
-        if (state.dragOrigin) {
+        // 矩形選択モードではクリック選択を行わない
+        if (state.selectMode === "rect") {
           return;
         }
 
@@ -1346,7 +1393,7 @@
 
           const additive =
             event.native &&
-            (event.native.ctrlKey || event.native.shiftKey || event.native.metaKey);
+            (event.native.ctrlKey || event.native.metaKey);
 
           if (!hit) {
 
@@ -1390,24 +1437,76 @@
         }
       }
 
+      // 2 点から矩形を作成
+      function makeExtent(origin, corner) {
+
+        return new Extent({
+          xmin: Math.min(origin.x, corner.x),
+          ymin: Math.min(origin.y, corner.y),
+          xmax: Math.max(origin.x, corner.x),
+          ymax: Math.max(origin.y, corner.y),
+          spatialReference: view.spatialReference
+        });
+      }
+
+      // ドラッグ中の矩形を描画
+      function drawRubberBand(extent) {
+
+        rubberBandLayer.removeAll();
+
+        if (!extent) {
+          return;
+        }
+
+        rubberBandLayer.add(new Graphic({
+          geometry: extent,
+          symbol: {
+            type: "simple-fill",
+            color: [0, 122, 194, 0.12],
+            outline: {
+              color: [0, 122, 194],
+              width: 1.5,
+              style: "dash"
+            }
+          }
+        }));
+      }
+
       // 矩形ドラッグによる選択
+      //   矩形選択モードのときのみ動作する。
+      //   ArcGIS 標準の Shift ドラッグによるズームとは併用しない。
       async function onMapDragForTznEdit(event) {
 
         if (!state.cellEditMode || !state.rxLayer) {
           return;
         }
 
-        // Shift ドラッグのときのみ矩形選択とする
-        if (!event.native || !event.native.shiftKey) {
+        if (state.selectMode !== "rect") {
           return;
         }
 
-        // 地図のパンを抑止
+        // 地図のパンとズームを抑止する
         event.stopPropagation();
 
         if (event.action === "start") {
 
           state.dragOrigin = view.toMap({ x: event.x, y: event.y });
+          drawRubberBand(null);
+          return;
+        }
+
+        if (event.action === "update") {
+
+          if (!state.dragOrigin) {
+            return;
+          }
+
+          const current = view.toMap({ x: event.x, y: event.y });
+
+          if (current) {
+            drawRubberBand(makeExtent(state.dragOrigin, current));
+          }
+
           return;
         }
 
@@ -1415,6 +1514,8 @@
 
           const origin = state.dragOrigin;
           state.dragOrigin = null;
+
+          drawRubberBand(null);
 
           if (!origin) {
             return;
@@ -1426,16 +1527,11 @@
             return;
           }
 
-          const extent = new Extent({
-            xmin: Math.min(origin.x, corner.x),
-            ymin: Math.min(origin.y, corner.y),
-            xmax: Math.max(origin.x, corner.x),
-            ymax: Math.max(origin.y, corner.y),
-            spatialReference: view.spatialReference
-          });
+          const extent = makeExtent(origin, corner);
 
-          // 範囲が極端に小さい場合はクリック扱いとする
+          // 範囲が極端に小さい場合は無視する
           if (extent.width <= 0 || extent.height <= 0) {
+            setStatus(ui.cellEditStatus, "範囲が小さすぎます。");
             return;
           }
 
@@ -1450,7 +1546,7 @@
               return;
             }
 
-            // 矩形選択は常に追加選択とする
+            // 矩形選択は既存の選択へ追加する
             toggleSelectionAdd(features);
 
             setStatus(
@@ -1464,6 +1560,47 @@
           }
         }
       }
+
+      // 選択モードの切り替え
+      function setSelectMode(mode) {
+
+        state.selectMode = mode;
+
+        state.dragOrigin = null;
+        drawRubberBand(null);
+
+        const isRect = mode === "rect";
+
+        ui.modeSingleBtn.className = isRect ? "" : "active";
+        ui.modeRectBtn.className = isRect ? "active" : "";
+
+        ui.modeHint.textContent = isRect
+          ? "地図上をドラッグして矩形範囲内のセルを追加選択します。"
+          : "セルをクリックで選択します。Ctrl キーを押しながらクリックすると追加選択します。";
+
+        // 矩形選択モードでは地図の操作を止める
+        if (view.navigation) {
+          view.navigation.browserTouchPanEnabled = !isRect;
+          view.navigation.momentumEnabled = !isRect;
+        }
+
+        view.container.style.cursor = isRect ? "crosshair" : "";
+
+        setStatus(
+          ui.cellEditStatus,
+          isRect
+            ? "矩形選択モードです。ドラッグしてください。"
+            : "個別選択モードです。セルをクリックしてください。"
+        );
+      }
+
+      ui.modeSingleBtn.onclick = function () {
+        setSelectMode("single");
+      };
+
+      ui.modeRectBtn.onclick = function () {
+        setSelectMode("rect");
+      };
 
       // 矩形選択用: 既存選択へ追加のみ行う
       function toggleSelectionAdd(features) {
@@ -1592,12 +1729,10 @@
         setStatus(
           ui.cellStatus,
           "TZN 編集モード中です。\n" +
-          "クリックで選択、Ctrl または Shift クリックで追加選択、\n" +
-          "Shift ドラッグで矩形選択します。"
+          "地図右下のパネルで選択モードを切り替えます。"
         );
 
         ui.cellEditorPanel.style.display = "";
-        setStatus(ui.cellEditStatus, "セルを選択してください。");
 
         // 編集中はポップアップを抑止する
         if (view.popup) {
@@ -1607,6 +1742,22 @@
 
         state.handles.push(view.on("click", onMapClickForTznEdit));
         state.handles.push(view.on("drag", onMapDragForTznEdit));
+
+        // ArcGIS 標準の Shift ドラッグによるズームを抑止する
+        state.handles.push(
+          view.on("drag", ["Shift"], function (event) {
+            event.stopPropagation();
+          })
+        );
+
+        // ダブルクリックによるズームを抑止する
+        state.handles.push(
+          view.on("double-click", function (event) {
+            event.stopPropagation();
+          })
+        );
+
+        setSelectMode("single");
 
         updateSelectionInfo();
       }
@@ -1622,6 +1773,8 @@
 
         state.handles = [];
 
+        drawRubberBand(null);
+
         ui.cellEditToggle.textContent = "TZN 編集モードを開始";
         ui.cellEditToggle.className = "";
 
@@ -1632,6 +1785,18 @@
         if (view.popup) {
           view.popup.autoOpenEnabled = true;
         }
+
+        // 地図操作とカーソルを元へ戻す
+        if (view.navigation) {
+          view.navigation.browserTouchPanEnabled = true;
+          view.navigation.momentumEnabled = true;
+        }
+
+        if (view.container) {
+          view.container.style.cursor = "";
+        }
+
+        state.selectMode = "single";
 
         clearSelection();
       }
