@@ -1341,28 +1341,84 @@
       }
 
       // ジオメトリ範囲でセルを問い合わせ
+      //
+      //  表示範囲内であればクライアント側の queryFeatures を用いる。
+      //  取得できない場合はサービスへ問い合わせる。
       async function queryCellsByGeometry(geometry) {
 
-        const query = state.rxLayer.createQuery();
-        query.geometry = geometry;
-        query.spatialRelationship = "intersects";
-        query.outFields = [
+        const outFields = [
           state.rxLayer.objectIdField,
           state.resolved.fieldId,
           state.resolved.tzn,
           state.resolved.pdv
         ];
+
+        const where = state.currentField
+          ? fieldWhereClause(state.currentField)
+          : "1=1";
+
+        // クライアント側のクエリを試す
+        try {
+
+          const layerView = await view.whenLayerView(state.rxLayer);
+
+          // タイルの読み込み完了を待つ
+          await reactiveWatch(function () {
+            return layerView.updating === false;
+          });
+
+          const clientQuery = layerView.createQuery();
+          clientQuery.geometry = geometry;
+          clientQuery.spatialRelationship = "intersects";
+          clientQuery.where = where;
+          clientQuery.outFields = outFields;
+          clientQuery.returnGeometry = true;
+
+          const clientResult = await layerView.queryFeatures(clientQuery);
+
+          if (clientResult.features.length) {
+            return clientResult.features;
+          }
+
+        } catch (error) {
+          console.warn("クライアント側クエリに失敗しました。", error);
+        }
+
+        // サービスへ問い合わせる
+        const query = state.rxLayer.createQuery();
+        query.geometry = geometry;
+        query.spatialRelationship = "intersects";
+        query.where = where;
+        query.outFields = outFields;
         query.returnGeometry = true;
         query.num = CONFIG.queryLimit;
-
-        // 圃場が選択されている場合はその圃場に限定
-        if (state.currentField) {
-          query.where = fieldWhereClause(state.currentField);
-        }
 
         const result = await state.rxLayer.queryFeatures(query);
 
         return result.features;
+      }
+
+      // 条件が満たされるまで待機する
+      function reactiveWatch(condition, timeout) {
+
+        return new Promise(function (resolve) {
+
+          if (condition()) {
+            resolve();
+            return;
+          }
+
+          const limit = Date.now() + (timeout || 5000);
+
+          const timer = setInterval(function () {
+
+            if (condition() || Date.now() > limit) {
+              clearInterval(timer);
+              resolve();
+            }
+
+          }, 100);
+        });
       }
 
       // クリックによる個別選択
@@ -1490,7 +1546,7 @@
 
         if (event.action === "start") {
 
-          state.dragOrigin = view.toMap({ x: event.x, y: event.y });
+          state.dragOrigin = { x: event.x, y: event.y };
           drawRubberBand(null);
           return;
         }
@@ -1501,10 +1557,11 @@
             return;
           }
 
+          const origin = view.toMap(state.dragOrigin);
           const current = view.toMap({ x: event.x, y: event.y });
 
-          if (current) {
-            drawRubberBand(makeExtent(state.dragOrigin, current));
+          if (origin && current) {
+            drawRubberBand(makeExtent(origin, current));
           }
 
           return;
@@ -1512,28 +1569,33 @@
 
         if (event.action === "end") {
 
-          const origin = state.dragOrigin;
+          const screenOrigin = state.dragOrigin;
           state.dragOrigin = null;
 
           drawRubberBand(null);
 
-          if (!origin) {
+          if (!screenOrigin) {
             return;
           }
 
+          // 画面座標での移動量を確認する
+          const deltaX = Math.abs(event.x - screenOrigin.x);
+          const deltaY = Math.abs(event.y - screenOrigin.y);
+
+          if (deltaX < 5 || deltaY < 5) {
+            setStatus(ui.cellEditStatus, "範囲が小さすぎます。もう少し広くドラッグしてください。");
+            return;
+          }
+
+          const origin = view.toMap(screenOrigin);
           const corner = view.toMap({ x: event.x, y: event.y });
 
-          if (!corner) {
+          if (!origin || !corner) {
+            setStatus(ui.cellEditStatus, "座標を取得できません。", true);
             return;
           }
 
           const extent = makeExtent(origin, corner);
-
-          // 範囲が極端に小さい場合は無視する
-          if (extent.width <= 0 || extent.height <= 0) {
-            setStatus(ui.cellEditStatus, "範囲が小さすぎます。");
-            return;
-          }
 
           try {
 
@@ -1578,10 +1640,16 @@
           ? "地図上をドラッグして矩形範囲内のセルを追加選択します。"
           : "セルをクリックで選択します。Ctrl キーを押しながらクリックすると追加選択します。";
 
-        // 矩形選択モードでは地図の操作を止める
+        // 矩形選択モードでは地図のドラッグ操作を止める
         if (view.navigation) {
+
           view.navigation.browserTouchPanEnabled = !isRect;
           view.navigation.momentumEnabled = !isRect;
+
+          if (view.navigation.actionMap) {
+            view.navigation.actionMap.dragPrimary = isRect ? "none" : "pan";
+            view.navigation.actionMap.dragSecondary = isRect ? "none" : "rotate";
+          }
         }
 
         view.container.style.cursor = isRect ? "crosshair" : "";
@@ -1788,8 +1856,14 @@
 
         // 地図操作とカーソルを元へ戻す
         if (view.navigation) {
+
           view.navigation.browserTouchPanEnabled = true;
           view.navigation.momentumEnabled = true;
+
+          if (view.navigation.actionMap) {
+            view.navigation.actionMap.dragPrimary = "pan";
+            view.navigation.actionMap.dragSecondary = "rotate";
+          }
         }
 
         if (view.container) {
