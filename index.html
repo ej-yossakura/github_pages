@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ISOXML 施肥設計アプリ V10</title>
+  <title>ISOXML 施肥設計アプリ V11</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -98,6 +98,14 @@
       background: #256628;
     }
 
+    button.warn {
+      background: #b45309;
+    }
+
+    button.warn:hover:not(:disabled) {
+      background: #92400e;
+    }
+
     .info-box {
       margin-top: 6px;
       background: #f3f4f6;
@@ -107,6 +115,27 @@
       font-size: 12px;
       white-space: pre-wrap;
       min-height: 18px;
+    }
+
+    .alert {
+      margin-top: 8px;
+      padding: 9px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .alert.warning {
+      background: #fef3c7;
+      border: 1px solid #d9a441;
+      color: #78500b;
+    }
+
+    .alert.success {
+      background: #e6f4ea;
+      border: 1px solid #7fb98a;
+      color: #24623a;
     }
 
     .section {
@@ -204,11 +233,6 @@
       border-color: #007ac2;
     }
 
-    .draw-tools button:disabled {
-      background: #f1f3f5;
-      color: #9ca3af;
-    }
-
     .draw-tools svg {
       width: 20px;
       height: 20px;
@@ -270,6 +294,20 @@
       text-align: right;
       color: #35566f;
       font-weight: 600;
+    }
+
+    /* チェックボックス */
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    .check-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
     }
 
     /* 統計タブ */
@@ -345,7 +383,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V10</h1>
+      <h1>ISOXML 施肥設計アプリ V11</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -453,9 +491,42 @@
         <div id="pdvStatus" class="info-box">圃場を選択してください。</div>
       </section>
 
-      <!-- ========== 7. 統計 ========== -->
+      <!-- ========== 7. 圃場外チェック ========== -->
+      <section id="checkSection" class="section">
+        <h2>7. 圃場外への散布チェック</h2>
+        <p class="small">
+          圃場ポリゴンの外側に TZN 1 以上のセルがないかを確認します。
+          セルの中心が圃場内にあるかで判定します。
+        </p>
+
+        <h3>圃場ポリゴンレイヤー</h3>
+        <select id="boundaryLayerSelect">
+          <option value="">レイヤーを選択してください</option>
+        </select>
+
+        <h3>圃場 ID フィールド</h3>
+        <select id="boundaryFieldSelect" disabled>
+          <option value="">先にレイヤーを選択してください</option>
+        </select>
+
+        <div id="boundaryMatchInfo" class="info-box">未確認</div>
+
+        <button id="checkRunBtn" disabled>圃場外の散布をチェック</button>
+
+        <div class="check-row">
+          <input type="checkbox" id="checkSelectResult" checked>
+          <label for="checkSelectResult">
+            検出したセルを選択状態にする（セクション 5 で編集できます）
+          </label>
+        </div>
+
+        <div id="checkResult"></div>
+        <div id="checkStatus" class="info-box">圃場ポリゴンレイヤーを選択してください。</div>
+      </section>
+
+      <!-- ========== 8. 統計 ========== -->
       <section id="statsSection" class="section">
-        <h2>7. 散布量の統計</h2>
+        <h2>8. 散布量の統計</h2>
         <div class="tabs">
           <button type="button" id="statsFieldTab" class="active">選択圃場</button>
           <button type="button" id="statsAllTab">全圃場</button>
@@ -465,9 +536,9 @@
         <div id="statsStatus" class="info-box">圃場を選択してください。</div>
       </section>
 
-      <!-- ========== 8. ISOXML出力 ========== -->
+      <!-- ========== 9. ISOXML出力 ========== -->
       <section id="exportSection" class="section">
-        <h2>8. ISOXML の出力</h2>
+        <h2>9. ISOXML の出力</h2>
         <p class="small">
           編集後のレイヤーから TASKDATA.XML と GRD バイナリを生成し、ZIP でダウンロードします。
         </p>
@@ -491,6 +562,7 @@
       "esri/Graphic",
       "esri/layers/GraphicsLayer",
       "esri/geometry/geometryEngine",
+      "esri/geometry/Point",
       "esri/identity/OAuthInfo",
       "esri/identity/IdentityManager",
       "esri/portal/Portal",
@@ -509,6 +581,7 @@
       Graphic,
       GraphicsLayer,
       geometryEngine,
+      Point,
       OAuthInfo,
       esriId,
       Portal,
@@ -604,9 +677,7 @@
       // ==========================================================
 
       const UNITS = {
-        // mg/m² から kg/ha
         pdvToKgPerHa: 0.01,
-        // mg/m² から kg/10a
         pdvToKgPer10a: 0.001
       };
 
@@ -656,6 +727,15 @@
         pdvReloadBtn: dom("pdvReloadBtn"),
         pdvStatus: dom("pdvStatus"),
 
+        checkSection: dom("checkSection"),
+        boundaryLayerSelect: dom("boundaryLayerSelect"),
+        boundaryFieldSelect: dom("boundaryFieldSelect"),
+        boundaryMatchInfo: dom("boundaryMatchInfo"),
+        checkRunBtn: dom("checkRunBtn"),
+        checkSelectResult: dom("checkSelectResult"),
+        checkResult: dom("checkResult"),
+        checkStatus: dom("checkStatus"),
+
         statsSection: dom("statsSection"),
         statsFieldTab: dom("statsFieldTab"),
         statsAllTab: dom("statsAllTab"),
@@ -682,6 +762,11 @@
         selection: new globalThis.Map(),
         sketchViewModel: null,
         activeTool: null,
+
+        // 圃場外チェック
+        polygonLayers: [],
+        boundaryLayer: null,
+        boundaryField: null,
 
         // 統計
         statsScope: "field"
@@ -846,6 +931,7 @@
           ui.fieldSection,
           ui.cellSection,
           ui.pdvSection,
+          ui.checkSection,
           ui.statsSection,
           ui.exportSection
         ].forEach(hide);
@@ -988,6 +1074,7 @@
           await view.when();
 
           collectRxLayers(webmap);
+          collectPolygonLayers(webmap);
 
           setStatus(ui.webmapStatus, "読み込み完了: " + item.title);
 
@@ -1078,7 +1165,7 @@
           );
 
           [ui.fieldSection, ui.cellSection, ui.pdvSection,
-          ui.statsSection, ui.exportSection].forEach(hide);
+          ui.checkSection, ui.statsSection, ui.exportSection].forEach(hide);
 
           return;
         }
@@ -1100,7 +1187,7 @@
 
         if (index === "") {
           [ui.fieldSection, ui.cellSection, ui.pdvSection,
-          ui.statsSection, ui.exportSection].forEach(hide);
+          ui.checkSection, ui.statsSection, ui.exportSection].forEach(hide);
           return;
         }
 
@@ -1115,7 +1202,6 @@
           applyTznRenderer(state.rxLayer);
           setupSketchViewModel();
 
-          // 透過度スライダーを現在値に合わせる
           syncOpacitySlider();
 
           const editable = Boolean(
@@ -1143,6 +1229,7 @@
 
           show(ui.fieldSection);
           show(ui.cellSection);
+          show(ui.checkSection);
           show(ui.statsSection);
           show(ui.exportSection);
 
@@ -1156,7 +1243,6 @@
 
       // ----- 透過度 -----
 
-      // スライダーをレイヤーの現在値へ同期する
       function syncOpacitySlider() {
 
         if (!state.rxLayer) {
@@ -1402,7 +1488,6 @@
 
           const geometry = event.graphic.geometry;
 
-          // 描いた図形は選択後に消す
           sketchLayer.removeAll();
           setActiveTool(null);
 
@@ -1441,8 +1526,7 @@
 
           setStatus(
             ui.cellStatus,
-            "フリーハンドで描画します。\n" +
-            "地図上をドラッグしてください。"
+            "フリーハンドで描画します。\n地図上をドラッグしてください。"
           );
 
           return;
@@ -1454,8 +1538,7 @@
 
           setStatus(
             ui.cellStatus,
-            "矩形で描画します。\n" +
-            "地図上をドラッグしてください。"
+            "矩形で描画します。\n地図上をドラッグしてください。"
           );
 
           return;
@@ -1480,7 +1563,6 @@
         setActiveTool(null);
       }
 
-      // ツールボタンの選択状態を更新する
       function setActiveTool(tool) {
 
         state.activeTool = tool;
@@ -1754,7 +1836,6 @@
 
           state.rxLayer.refresh();
 
-          // 集計を更新
           if (state.currentField) {
             await loadPdvForField(state.currentField);
           }
@@ -1802,7 +1883,6 @@
           input.step = "1";
           input.id = "pdvInput" + zone;
 
-          // 入力に応じて換算値を更新する
           input.oninput = function () {
             updateConvertedValue(zone);
           };
@@ -2090,7 +2170,600 @@
       };
 
       // ==========================================================
-      // 7. 散布量の統計
+      // 7. 圃場外への散布チェック
+      //
+      //  セルの中心が圃場ポリゴンの内側にあるかで判定する。
+      //  中心座標は center_x、center_y があればそれを使い、
+      //  無い場合はジオメトリの重心を用いる。
+      // ==========================================================
+
+      const boundary = {};
+
+      // ポリゴンレイヤーの候補を集める
+      function collectPolygonLayers(targetMap) {
+
+        state.polygonLayers = [];
+        state.boundaryLayer = null;
+        state.boundaryField = null;
+
+        ui.boundaryLayerSelect.innerHTML =
+          '<option value="">レイヤーを選択してください</option>';
+
+        ui.boundaryFieldSelect.innerHTML =
+          '<option value="">先にレイヤーを選択してください</option>';
+
+        ui.boundaryFieldSelect.disabled = true;
+        ui.checkRunBtn.disabled = true;
+        ui.checkResult.innerHTML = "";
+
+        targetMap.allLayers.forEach(function (candidate) {
+
+          if (candidate.type !== "feature") {
+            return;
+          }
+
+          if (candidate.geometryType !== "polygon") {
+            return;
+          }
+
+          state.polygonLayers.push(candidate);
+
+          const option = document.createElement("option");
+          option.value = String(state.polygonLayers.length - 1);
+          option.textContent = candidate.title;
+          ui.boundaryLayerSelect.append(option);
+        });
+
+        setStatus(
+          ui.checkStatus,
+          state.polygonLayers.length
+            ? state.polygonLayers.length + " 件のポリゴンレイヤーがあります。"
+            : "ポリゴンレイヤーがありません。"
+        );
+      }
+
+      // 圃場ポリゴンレイヤーを選択
+      ui.boundaryLayerSelect.onchange = async function () {
+
+        const index = ui.boundaryLayerSelect.value;
+
+        ui.boundaryFieldSelect.innerHTML = "";
+        ui.boundaryFieldSelect.disabled = true;
+        ui.checkRunBtn.disabled = true;
+        ui.checkResult.innerHTML = "";
+        setStatus(ui.boundaryMatchInfo, "未確認");
+
+        if (index === "") {
+          state.boundaryLayer = null;
+          state.boundaryField = null;
+          ui.boundaryFieldSelect.innerHTML =
+            '<option value="">先にレイヤーを選択してください</option>';
+          return;
+        }
+
+        state.boundaryLayer = state.polygonLayers[Number(index)];
+
+        try {
+
+          await state.boundaryLayer.load();
+
+          // 圃場 ID の候補となるフィールドを並べる
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "フィールドを選択してください";
+          ui.boundaryFieldSelect.append(option);
+
+          state.boundaryLayer.fields.forEach(function (field) {
+
+            // ジオメトリ系とグローバル ID は除外する
+            if (field.type === "geometry" ||
+              field.type === "global-id" ||
+              field.type === "blob") {
+              return;
+            }
+
+            const item = document.createElement("option");
+            item.value = field.name;
+            item.textContent = field.alias && field.alias !== field.name
+              ? field.name + "（" + field.alias + "）"
+              : field.name;
+
+            ui.boundaryFieldSelect.append(item);
+          });
+
+          ui.boundaryFieldSelect.disabled = false;
+
+          // 施肥設計側と同名のフィールドがあれば初期選択する
+          const sameName = state.boundaryLayer.fields.find(function (field) {
+            return field.name.toUpperCase() ===
+              String(state.resolved.fieldId).toUpperCase();
+          });
+
+          if (sameName) {
+            ui.boundaryFieldSelect.value = sameName.name;
+            await onBoundaryFieldChange();
+          } else {
+            setStatus(
+              ui.checkStatus,
+              "選択: " + state.boundaryLayer.title +
+              "\n圃場 ID フィールドを選択してください。"
+            );
+          }
+
+        } catch (error) {
+          console.error(error);
+          setStatus(ui.checkStatus, "レイヤーの読み込みに失敗しました: " + errorText(error), true);
+        }
+      };
+
+      // 圃場 ID フィールドを選択
+      async function onBoundaryFieldChange() {
+
+        const fieldName = ui.boundaryFieldSelect.value;
+
+        ui.checkResult.innerHTML = "";
+
+        if (!fieldName) {
+          state.boundaryField = null;
+          ui.checkRunBtn.disabled = true;
+          setStatus(ui.boundaryMatchInfo, "未確認");
+          return;
+        }
+
+        state.boundaryField = fieldName;
+
+        // 施肥設計レイヤーの圃場 ID と一致するか確認する
+        await boundary.verifyFieldMatch();
+      }
+
+      ui.boundaryFieldSelect.onchange = onBoundaryFieldChange;
+
+      // 圃場 ID の一致状況を確認する
+      boundary.verifyFieldMatch = async function () {
+
+        try {
+
+          setStatus(ui.boundaryMatchInfo, "照合中...");
+          ui.checkRunBtn.disabled = true;
+
+          const query = state.boundaryLayer.createQuery();
+          query.where = "1=1";
+          query.outFields = [state.boundaryField];
+          query.returnDistinctValues = true;
+          query.returnGeometry = false;
+
+          const result = await state.boundaryLayer.queryFeatures(query);
+
+          const boundaryIds = new Set(
+            result.features
+              .map(function (feature) {
+                return String(feature.attributes[state.boundaryField]);
+              })
+              .filter(function (value) {
+                return value !== "null" && value !== "";
+              })
+          );
+
+          // 施肥設計側の圃場 ID と照合する
+          const matched = [];
+          const unmatched = [];
+
+          state.fields.forEach(function (fieldId) {
+
+            if (boundaryIds.has(String(fieldId))) {
+              matched.push(fieldId);
+            } else {
+              unmatched.push(fieldId);
+            }
+          });
+
+          ui.checkRunBtn.disabled = false;
+
+          if (!matched.length) {
+
+            setStatus(
+              ui.boundaryMatchInfo,
+              "警告: 圃場 ID が 1 件も一致しません。\n" +
+              "施肥設計側: " + state.resolved.fieldId + "\n" +
+              "圃場側: " + state.boundaryField + "\n" +
+              "フィールドの選択を確認してください。",
+              true
+            );
+
+            return;
+          }
+
+          if (unmatched.length) {
+
+            const sample = unmatched.slice(0, 5).join(", ");
+
+            setStatus(
+              ui.boundaryMatchInfo,
+              "警告: 一部の圃場 ID が一致しません。\n" +
+              "一致: " + matched.length + " 件\n" +
+              "不一致: " + unmatched.length + " 件\n" +
+              "例: " + sample + (unmatched.length > 5 ? " ほか" : ""),
+              true
+            );
+
+            return;
+          }
+
+          setStatus(
+            ui.boundaryMatchInfo,
+            "圃場 ID はすべて一致しています。\n対象: " + matched.length + " 圃場"
+          );
+
+        } catch (error) {
+          console.error(error);
+          setStatus(ui.boundaryMatchInfo, "照合に失敗しました: " + errorText(error), true);
+        }
+      };
+
+      // セルの中心点を求める
+      boundary.cellCenter = function (feature) {
+
+        // center_x、center_y があればそれを使う
+        if (state.resolved.centerX && state.resolved.centerY) {
+
+          const x = Number(feature.attributes[state.resolved.centerX]);
+          const y = Number(feature.attributes[state.resolved.centerY]);
+
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            return new Point({
+              x: x,
+              y: y,
+              spatialReference: { wkid: 4326 }
+            });
+          }
+        }
+
+        // 無ければジオメトリの重心を使う
+        if (feature.geometry && feature.geometry.centroid) {
+          return feature.geometry.centroid;
+        }
+
+        return null;
+      };
+
+      // 圃場外のセルを検出する
+      boundary.findOutsideCells = async function (fieldId) {
+
+        // 圃場ポリゴンを取得する
+        const escaped = String(fieldId).replace(/'/g, "''");
+
+        const boundaryQuery = state.boundaryLayer.createQuery();
+        boundaryQuery.where = state.boundaryField + " = '" + escaped + "'";
+        boundaryQuery.returnGeometry = true;
+        boundaryQuery.outFields = [state.boundaryField];
+        boundaryQuery.outSpatialReference = { wkid: 4326 };
+
+        const boundaryResult =
+          await state.boundaryLayer.queryFeatures(boundaryQuery);
+
+        if (!boundaryResult.features.length) {
+          return { missing: true, fieldId: fieldId };
+        }
+
+        // 複数ポリゴンがある場合は結合する
+        const geometries = boundaryResult.features.map(function (feature) {
+          return feature.geometry;
+        });
+
+        const fieldPolygon = geometries.length === 1
+          ? geometries[0]
+          : geometryEngine.union(geometries);
+
+        // TZN 1 以上のセルを取得する
+        const cellQuery = state.rxLayer.createQuery();
+        cellQuery.where =
+          fieldWhereClause(fieldId) + " AND " + state.resolved.tzn + " > 0";
+        cellQuery.outFields = [
+          state.rxLayer.objectIdField,
+          state.resolved.fieldId,
+          state.resolved.tzn,
+          state.resolved.pdv
+        ];
+
+        if (state.resolved.centerX && state.resolved.centerY) {
+          cellQuery.outFields.push(state.resolved.centerX);
+          cellQuery.outFields.push(state.resolved.centerY);
+        }
+
+        if (state.resolved.gridId) {
+          cellQuery.outFields.push(state.resolved.gridId);
+        }
+
+        cellQuery.returnGeometry = true;
+        cellQuery.outSpatialReference = { wkid: 4326 };
+        cellQuery.num = CONFIG.queryLimit;
+
+        const cellResult = await state.rxLayer.queryFeatures(cellQuery);
+
+        // セル中心が圃場内にあるかを判定する
+        const outside = cellResult.features.filter(function (feature) {
+
+          const center = boundary.cellCenter(feature);
+
+          if (!center) {
+            return false;
+          }
+
+          return !geometryEngine.contains(fieldPolygon, center);
+        });
+
+        // セル面積を求める
+        let cellArea = null;
+
+        if (cellResult.features.length && cellResult.features[0].geometry) {
+          cellArea = Math.abs(geometryEngine.geodesicArea(
+            cellResult.features[0].geometry,
+            "square-meters"
+          ));
+        }
+
+        // TZN 別に集計する
+        const zones = {};
+
+        outside.forEach(function (feature) {
+
+          const zone = Number(feature.attributes[state.resolved.tzn]);
+
+          if (!zones[zone]) {
+            zones[zone] = { count: 0, pdv: null };
+          }
+
+          zones[zone].count += 1;
+
+          const pdv = feature.attributes[state.resolved.pdv];
+
+          if (zones[zone].pdv === null && pdv !== null && pdv !== undefined) {
+            zones[zone].pdv = Number(pdv);
+          }
+        });
+
+        // 想定される散布量を求める
+        let wastedAmount = null;
+
+        if (cellArea) {
+
+          wastedAmount = 0;
+
+          Object.keys(zones).forEach(function (zone) {
+
+            const info = zones[zone];
+
+            if (info.pdv !== null) {
+              wastedAmount += (info.pdv * info.count * cellArea) / 1000000;
+            }
+          });
+        }
+
+        return {
+          missing: false,
+          fieldId: fieldId,
+          checkedCells: cellResult.features.length,
+          outsideFeatures: outside,
+          outsideCount: outside.length,
+          outsideArea: cellArea ? outside.length * cellArea : null,
+          wastedAmount: wastedAmount,
+          zones: zones
+        };
+      };
+
+      // 検出結果を描画する
+      boundary.renderResult = function (result) {
+
+        const container = document.createElement("div");
+
+        if (result.missing) {
+
+          const alert = document.createElement("div");
+          alert.className = "alert warning";
+          alert.textContent =
+            "圃場ポリゴンが見つかりません。\n" +
+            "圃場 ID: " + result.fieldId + "\n" +
+            "圃場 ID フィールドの選択を確認してください。";
+
+          container.append(alert);
+
+          return container;
+        }
+
+        if (!result.outsideCount) {
+
+          const alert = document.createElement("div");
+          alert.className = "alert success";
+          alert.textContent =
+            "圃場外への散布はありません。\n" +
+            "圃場: " + result.fieldId + "\n" +
+            "確認セル数: " + formatNumber(result.checkedCells) + " 個";
+
+          container.append(alert);
+
+          return container;
+        }
+
+        // 警告
+        const alert = document.createElement("div");
+        alert.className = "alert warning";
+        alert.textContent = "圃場外に散布指定があります。";
+        container.append(alert);
+
+        // サマリー
+        const list = document.createElement("dl");
+        list.className = "summary";
+
+        const rows = [
+          ["圃場", result.fieldId],
+          ["確認セル数", formatNumber(result.checkedCells) + " 個"],
+          ["圃場外セル", formatNumber(result.outsideCount) + " 個"],
+          ["該当面積", result.outsideArea
+            ? formatNumber(result.outsideArea / 10000, 3) + " ha" : "—"],
+          ["想定散布量", result.wastedAmount !== null
+            ? formatNumber(result.wastedAmount, 2) + " kg" : "—"]
+        ];
+
+        rows.forEach(function (row) {
+
+          const term = document.createElement("dt");
+          term.textContent = row[0];
+
+          const value = document.createElement("dd");
+          value.textContent = row[1];
+
+          list.append(term, value);
+        });
+
+        container.append(list);
+
+        // TZN 別内訳
+        const heading = document.createElement("h3");
+        heading.textContent = "TZN 別の内訳";
+        container.append(heading);
+
+        const table = document.createElement("table");
+        table.className = "grid";
+
+        const head = document.createElement("thead");
+        head.innerHTML =
+          "<tr>" +
+          "<th style='width:24px;'></th>" +
+          "<th style='width:32px;'>TZN</th>" +
+          "<th>セル数</th>" +
+          "<th>散布量<br>(kg/10a)</th>" +
+          "</tr>";
+
+        const body = document.createElement("tbody");
+
+        Object.keys(result.zones)
+          .sort(function (a, b) { return Number(a) - Number(b); })
+          .forEach(function (zone) {
+
+            const info = result.zones[zone];
+
+            const row = document.createElement("tr");
+
+            const colorCell = document.createElement("td");
+            const swatch = document.createElement("span");
+            swatch.className = "swatch";
+            swatch.style.background = rgba(Number(zone));
+            colorCell.append(swatch);
+
+            const zoneCell = document.createElement("td");
+            zoneCell.textContent = zone;
+
+            const countCell = document.createElement("td");
+            countCell.className = "num";
+            countCell.textContent = formatNumber(info.count);
+
+            const rateCell = document.createElement("td");
+            rateCell.className = "num";
+            rateCell.textContent = info.pdv !== null
+              ? formatNumber(info.pdv * UNITS.pdvToKgPer10a, 2) : "—";
+
+            row.append(colorCell, zoneCell, countCell, rateCell);
+            body.append(row);
+          });
+
+        table.append(head, body);
+        container.append(table);
+
+        return container;
+      };
+
+      // チェックを実行する
+      ui.checkRunBtn.onclick = async function () {
+
+        if (!state.rxLayer || !state.boundaryLayer || !state.boundaryField) {
+          return;
+        }
+
+        try {
+
+          ui.checkRunBtn.disabled = true;
+          ui.checkResult.innerHTML = "";
+
+          // 対象は選択中の圃場、未選択なら全圃場
+          const targets = state.currentField
+            ? [state.currentField]
+            : state.fields;
+
+          if (!targets.length) {
+            ui.checkRunBtn.disabled = false;
+            setStatus(ui.checkStatus, "対象の圃場がありません。", true);
+            return;
+          }
+
+          setStatus(ui.checkStatus, "チェック中... (0/" + targets.length + ")");
+
+          const results = [];
+          const collected = [];
+
+          for (let index = 0; index < targets.length; index++) {
+
+            setStatus(
+              ui.checkStatus,
+              "チェック中... (" + (index + 1) + "/" + targets.length + ") " +
+              targets[index]
+            );
+
+            const result = await boundary.findOutsideCells(targets[index]);
+
+            results.push(result);
+
+            if (!result.missing && result.outsideCount) {
+              result.outsideFeatures.forEach(function (feature) {
+                collected.push(feature);
+              });
+            }
+          }
+
+          // 結果を描画する
+          results.forEach(function (result) {
+            ui.checkResult.append(boundary.renderResult(result));
+          });
+
+          ui.checkRunBtn.disabled = false;
+
+          // 検出したセルを選択状態にする
+          if (ui.checkSelectResult.checked && collected.length) {
+
+            clearSelection();
+            addToSelection(collected);
+
+            setStatus(
+              ui.checkStatus,
+              "チェック完了。\n" +
+              "圃場外セル: " + collected.length + " 個\n" +
+              "セクション 5 の TZN ボタンで一括変更できます。",
+              true
+            );
+
+            return;
+          }
+
+          const total = results.reduce(function (sum, result) {
+            return sum + (result.outsideCount || 0);
+          }, 0);
+
+          setStatus(
+            ui.checkStatus,
+            total
+              ? "チェック完了。圃場外セル: " + total + " 個"
+              : "チェック完了。圃場外への散布はありません。",
+            total > 0
+          );
+
+        } catch (error) {
+          console.error(error);
+          ui.checkRunBtn.disabled = false;
+          setStatus(ui.checkStatus, "チェックに失敗しました: " + errorText(error), true);
+        }
+      };
+
+      // ==========================================================
+      // 8. 散布量の統計
       //
       //  セル面積は測地面積から求める。
       //  散布量(kg) = PDV(mg/m²) × 面積(m²) ÷ 1,000,000
@@ -2211,7 +2884,6 @@
           // 散布量(kg) = PDV(mg/m²) × 面積(m²) ÷ 1,000,000
           info.amount = (info.pdv * info.area) / 1000000;
 
-          // 単位面積あたり
           info.rate = info.pdv * UNITS.pdvToKgPerHa;
           info.rate10a = info.pdv * UNITS.pdvToKgPer10a;
 
@@ -2249,7 +2921,6 @@
 
         const container = document.createElement("div");
 
-        // サマリー
         const list = document.createElement("dl");
         list.className = "summary";
 
@@ -2292,7 +2963,6 @@
 
         container.append(list);
 
-        // TZN 別内訳
         const heading = document.createElement("h3");
         heading.textContent = "TZN 別の内訳";
         container.append(heading);
@@ -2356,7 +3026,6 @@
           body.append(row);
         }
 
-        // 合計行
         const totalRow = document.createElement("tr");
         totalRow.className = "total";
 
@@ -2398,7 +3067,6 @@
 
         const container = document.createElement("div");
 
-        // 全体サマリー
         let totalCells = 0;
         let totalArea = 0;
         let appliedArea = 0;
@@ -2474,7 +3142,6 @@
 
         container.append(list);
 
-        // 圃場別一覧
         const heading = document.createElement("h3");
         heading.textContent = "圃場別の一覧";
         container.append(heading);
@@ -2519,7 +3186,6 @@
           body.append(row);
         });
 
-        // 合計行
         const totalRow = document.createElement("tr");
         totalRow.className = "total";
 
@@ -2585,7 +3251,6 @@
             return;
           }
 
-          // 全圃場
           if (!state.fields.length) {
             setStatus(ui.statsStatus, "圃場がありません。");
             return;
@@ -2641,7 +3306,7 @@
       ui.statsRefreshBtn.onclick = refreshStats;
 
       // ==========================================================
-      // 8. ISOXML の出力
+      // 9. ISOXML の出力
       //
       //  ArcGIS Pro スクリプトツール ExportMultiFieldISOXML.py の
       //  ロジックを踏襲する。
