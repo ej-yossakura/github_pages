@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ISOXML 施肥設計アプリ V12</title>
+  <title>ISOXML 施肥設計アプリ V13</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -201,6 +201,58 @@
       color: #5f6b7a;
     }
 
+    /* 総散布量の入力と差分 */
+    .target-row {
+      display: grid;
+      grid-template-columns: 1fr 34px;
+      gap: 6px;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .target-row input {
+      margin: 0;
+      text-align: right;
+    }
+
+    .target-row span {
+      font-size: 12px;
+      color: #35566f;
+      font-weight: 600;
+    }
+
+    .balance {
+      margin-top: 8px;
+      padding: 9px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      border: 1px solid #d7dde3;
+      background: #f8fafc;
+    }
+
+    .balance.under {
+      background: #e6f4ea;
+      border-color: #7fb98a;
+      color: #24623a;
+    }
+
+    .balance.exact {
+      background: #e6f4ea;
+      border-color: #2e7d32;
+      color: #1b5e20;
+      font-weight: 600;
+    }
+
+    /* 総散布量を超過している場合 */
+    .balance.over {
+      background: #fde8e8;
+      border: 2px solid #c62828;
+      color: #8e1515;
+      font-weight: 600;
+    }
+
     /* 選択ツール */
     .draw-tools {
       display: grid;
@@ -383,7 +435,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V12</h1>
+      <h1>ISOXML 施肥設計アプリ V13</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -441,6 +493,7 @@
         <h2>5. TZN の編集</h2>
         <p class="small">
           ツールを選び、地図上で範囲を描くと、その中のセルを選択します。
+          描くたびに新しい選択に置き換わります。
         </p>
 
         <div class="draw-tools" id="drawTools">
@@ -480,6 +533,18 @@
           選択した圃場の TZN ごとに散布量を設定します。
           同一圃場・同一 TZN のセルには同じ値が書き込まれます。
         </p>
+
+        <h3>総散布量の目安</h3>
+        <p class="small">
+          目標値を入力すると、設定中の PDV との差分を表示します。
+        </p>
+        <div class="target-row">
+          <input id="targetAmount" type="number" min="0" step="1"
+            placeholder="総散布量（空欄で無効）">
+          <span>kg</span>
+        </div>
+        <div id="balanceInfo" class="balance">総散布量を入力してください。</div>
+
         <table class="grid">
           <thead>
             <tr>
@@ -654,6 +719,9 @@
         selectionColor: [255, 255, 0, 0.35],
         selectionOutline: [255, 140, 0],
 
+        // 総散布量の一致とみなす許容差（kg）
+        balanceTolerance: 0.05,
+
         // ISOXML 出力設定
         isoxml: {
           versionMajor: "3",
@@ -731,6 +799,8 @@
         cellStatus: dom("cellStatus"),
 
         pdvSection: dom("pdvSection"),
+        targetAmount: dom("targetAmount"),
+        balanceInfo: dom("balanceInfo"),
         pdvTableBody: dom("pdvTableBody"),
         pdvApplyBtn: dom("pdvApplyBtn"),
         pdvReloadBtn: dom("pdvReloadBtn"),
@@ -769,6 +839,10 @@
 
         // レイヤー本来の表示条件（復元用）
         baseDefinitionExpression: null,
+
+        // 差分計算用: セル面積と TZN 別セル数
+        cellArea: null,
+        cellCounts: {},
 
         // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
         selection: new globalThis.Map(),
@@ -1482,6 +1556,11 @@
 
         clearSelection();
 
+        // 圃場が変わったら目標値を消す
+        ui.targetAmount.value = "";
+        state.cellArea = null;
+        state.cellCounts = {};
+
         if (!fieldId) {
           state.currentField = null;
           ui.zoomFieldBtn.disabled = true;
@@ -1519,6 +1598,8 @@
       //
       //  SketchViewModel で範囲を描き、
       //  範囲内のセルを選択して TZN を一括設定する。
+      //
+      //  範囲を描くたびに新規選択とする。
       //
       //  Sketch ウィジェットのツールバーには
       //  フリーハンドのボタンが用意されていないため、
@@ -1664,6 +1745,8 @@
       // ----- 選択 -----
 
       // 描画した範囲でセルを選択
+      //
+      //   描くたびに新規選択とする
       async function selectByGeometry(geometry) {
 
         if (!state.rxLayer || !geometry) {
@@ -1697,6 +1780,9 @@
             setStatus(ui.cellStatus, "範囲内にセルがありません。");
             return;
           }
+
+          // 既存の選択を破棄して新規選択とする
+          state.selection.clear();
 
           addToSelection(result.features);
 
@@ -1934,6 +2020,8 @@
 
       // ==========================================================
       // 6. 圃場単位の PDV 編集
+      //
+      //  総散布量を入力すると、設定中の PDV との差分を表示する。
       // ==========================================================
 
       function buildPdvTable() {
@@ -1962,6 +2050,7 @@
 
           input.oninput = function () {
             updateConvertedValue(zone);
+            updateBalance();
           };
 
           // TZN 0 は散布なしのため 0 固定
@@ -2021,6 +2110,122 @@
         }
       }
 
+      // ----- 総散布量との差分 -----
+
+      // 設定中の PDV から総散布量を求める
+      //
+      //   散布量(kg) = PDV(mg/m²) × セル数 × セル面積(m²) ÷ 1,000,000
+      function calculateTotalAmount() {
+
+        if (!state.cellArea) {
+          return null;
+        }
+
+        let total = 0;
+
+        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
+
+          // TZN 0 は散布なし
+          if (zone === 0) {
+            continue;
+          }
+
+          const count = state.cellCounts[zone] || 0;
+
+          if (!count) {
+            continue;
+          }
+
+          const raw = dom("pdvInput" + zone).value.trim();
+
+          if (raw === "") {
+            continue;
+          }
+
+          const parsed = Number(raw);
+
+          if (!Number.isFinite(parsed) || parsed < 0) {
+            continue;
+          }
+
+          total += (parsed * count * state.cellArea) / 1000000;
+        }
+
+        return total;
+      }
+
+      // 総散布量との差分を表示する
+      function updateBalance() {
+
+        const raw = ui.targetAmount.value.trim();
+
+        // 目標値が未入力なら現在の合計だけを示す
+        if (raw === "") {
+
+          const current = calculateTotalAmount();
+
+          ui.balanceInfo.className = "balance";
+
+          ui.balanceInfo.textContent = current === null
+            ? "セル面積を取得できないため、散布量を計算できません。"
+            : "設定中の合計: " + formatNumber(current, 1) + " kg\n" +
+              "総散布量を入力すると差分を表示します。";
+
+          return;
+        }
+
+        const target = Number(raw);
+
+        if (!Number.isFinite(target) || target < 0) {
+          ui.balanceInfo.className = "balance over";
+          ui.balanceInfo.textContent = "総散布量の値が不正です。";
+          return;
+        }
+
+        const current = calculateTotalAmount();
+
+        if (current === null) {
+          ui.balanceInfo.className = "balance";
+          ui.balanceInfo.textContent =
+            "セル面積を取得できないため、差分を計算できません。";
+          return;
+        }
+
+        // 差分 = 目標 − 設定中
+        const difference = target - current;
+
+        const message =
+          "目標: " + formatNumber(target, 1) + " kg\n" +
+          "設定中: " + formatNumber(current, 1) + " kg\n";
+
+        // 端数を無視して一致とみなす
+        if (Math.abs(difference) <= CONFIG.balanceTolerance) {
+
+          ui.balanceInfo.className = "balance exact";
+          ui.balanceInfo.textContent = message + "過不足なし";
+
+          return;
+        }
+
+        if (difference > 0) {
+
+          ui.balanceInfo.className = "balance under";
+
+          ui.balanceInfo.textContent = message +
+            "残り: " + formatNumber(difference, 1) + " kg";
+
+          return;
+        }
+
+        // 目標を超過している場合
+        ui.balanceInfo.className = "balance over";
+
+        ui.balanceInfo.textContent = message +
+          "超過: " + formatNumber(Math.abs(difference), 1) + " kg";
+      }
+
+      ui.targetAmount.oninput = updateBalance;
+
       async function loadPdvForField(fieldId) {
 
         try {
@@ -2037,6 +2242,10 @@
           query.num = CONFIG.queryLimit;
 
           const result = await state.rxLayer.queryFeatures(query);
+
+          // 差分計算用にセル面積を求める
+          state.cellArea = await stats.cellArea(fieldWhereClause(fieldId));
+          state.cellCounts = {};
 
           const summary = {};
 
@@ -2070,6 +2279,9 @@
 
             countCell.textContent = info.count;
 
+            // 差分計算用に保持する
+            state.cellCounts[zone] = info.count;
+
             if (zone === 0) {
               input.value = "0";
               continue;
@@ -2088,6 +2300,9 @@
           }
 
           updateAllConvertedValues();
+
+          // 差分表示を更新する
+          updateBalance();
 
           ui.pdvApplyBtn.disabled = false;
           ui.pdvReloadBtn.disabled = false;
