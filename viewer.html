@@ -68,10 +68,14 @@
     <div id="status">ISOXMLファイルを選択してください。</div>
 
     <h2>圃場選択・ズーム</h2>
+    <p class="small">
+      圃場を選択すると、その圃場のセルだけを表示します。
+    </p>
     <select id="fieldSelect" disabled>
       <option value="">圃場を選択してください</option>
     </select>
     <button id="zoomBtn" disabled>選択圃場へズーム</button>
+    <button id="showAllBtn" class="secondary" disabled>すべての圃場を表示</button>
     <div id="fields"></div>
 
     <h2>TZN凡例</h2>
@@ -157,6 +161,7 @@ require([
     status:document.getElementById("status"),
     fieldSelect:document.getElementById("fieldSelect"),
     zoomBtn:document.getElementById("zoomBtn"),
+    showAllBtn:document.getElementById("showAllBtn"),
     fields:document.getElementById("fields"),
     legend:document.getElementById("legend"),
     statsFieldTab:document.getElementById("statsFieldTab"),
@@ -291,6 +296,31 @@ require([
       color:COLORS[zone] || [80,80,80,.65],
       outline:{color:[30,30,30,.4],width:.35}
     };
+  }
+
+  // ==========================================================
+  // 表示の絞り込み
+  //
+  //  圃場を選択すると、その圃場のセルだけを表示する。
+  //  taskId が null の場合はすべて表示する。
+  // ==========================================================
+
+  function applyFieldFilter(taskId) {
+
+    tasks.forEach((info, key) => {
+
+      // 選択圃場のみ表示、未選択ならすべて表示
+      const visible = !taskId || key === taskId;
+
+      info.graphics.forEach(graphic => {
+        graphic.visible = visible;
+      });
+
+      // 圃場一覧のチェックボックスも同期する
+      if (info.checkbox) {
+        info.checkbox.checked = visible;
+      }
+    });
   }
 
   // ==========================================================
@@ -799,6 +829,13 @@ require([
           }
         }
 
+        const label = document.createElement("label");
+        label.className = "field-row";
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = true;
+        check.onchange = () => graphics.forEach(graphic => graphic.visible = check.checked);
+
         tasks.set(taskId,{
           name,
           graphics,
@@ -807,7 +844,9 @@ require([
           vpns,
           cellArea,
           cols,
-          rows
+          rows,
+          // 表示切替でチェック状態を同期するため保持する
+          checkbox:check
         });
 
         const option = document.createElement("option");
@@ -815,12 +854,6 @@ require([
         option.textContent = `${name} (${cols} × ${rows})`;
         ui.fieldSelect.append(option);
 
-        const label = document.createElement("label");
-        label.className = "field-row";
-        const check = document.createElement("input");
-        check.type = "checkbox";
-        check.checked = true;
-        check.onchange = () => graphics.forEach(graphic => graphic.visible = check.checked);
         label.append(check, document.createTextNode(option.textContent));
         ui.fields.append(label);
         total += expected;
@@ -828,6 +861,8 @@ require([
 
       ui.fieldSelect.disabled = false;
       ui.zoomBtn.disabled = false;
+      ui.showAllBtn.disabled = false;
+
       if (gridLayer.graphics.length) await view.goTo(gridLayer.graphics.toArray(),{padding:40});
       status(`読込完了\n圃場: ${taskNodes.length}\nセル: ${total}`);
 
@@ -840,15 +875,78 @@ require([
     }
   }
 
-  async function zoomSelected() {
-    const info = tasks.get(ui.fieldSelect.value);
-    if (!info) return;
+  // 圃場を選択したときの処理
+  //
+  //   選択圃場のみを表示してズームする
+  async function onFieldChange() {
+
+    const taskId = ui.fieldSelect.value;
+
+    // 未選択ならすべて表示する
+    if (!taskId) {
+
+      applyFieldFilter(null);
+      renderLegend();
+
+      if (gridLayer.graphics.length) {
+        await view.goTo(gridLayer.graphics.toArray(),{padding:40});
+      }
+
+      status("すべての圃場を表示しています。");
+
+      setStatsScope("all");
+
+      return;
+    }
+
+    const info = tasks.get(taskId);
+
+    if (!info) {
+      return;
+    }
+
+    // 選択圃場以外を非表示にする
+    applyFieldFilter(taskId);
+
     await view.goTo(info.graphics,{padding:60});
+
     renderLegend(info);
-    status(`選択圃場: ${info.name}\nセル: ${info.graphics.length}`);
+
+    status(
+      `選択圃場: ${info.name}\n` +
+      `セル: ${info.graphics.length}\n` +
+      "この圃場のみを表示しています。"
+    );
 
     // 選択圃場タブへ切り替えて統計を更新する
     setStatsScope("field");
+  }
+
+  // 選択圃場へズームする
+  async function zoomSelected() {
+
+    const info = tasks.get(ui.fieldSelect.value);
+
+    if (!info) {
+      return;
+    }
+
+    await view.goTo(info.graphics,{padding:60});
+  }
+
+  // すべての圃場を表示する
+  async function showAllFields() {
+
+    applyFieldFilter(null);
+
+    if (gridLayer.graphics.length) {
+      await view.goTo(gridLayer.graphics.toArray(),{padding:40});
+    }
+
+    status(
+      "すべての圃場を表示しています。\n" +
+      `選択圃場: ${tasks.get(ui.fieldSelect.value)?.name ?? "なし"}`
+    );
   }
 
   function clearDisplay(updateStatus=true) {
@@ -857,6 +955,7 @@ require([
     ui.fieldSelect.innerHTML = '<option value="">圃場を選択してください</option>';
     ui.fieldSelect.disabled = true;
     ui.zoomBtn.disabled = true;
+    ui.showAllBtn.disabled = true;
     ui.fields.innerHTML = "";
     ui.statsContent.innerHTML = "";
     renderLegend();
@@ -894,8 +993,9 @@ require([
 
   ui.loadBtn.onclick = () => renderFiles(droppedFiles || ui.files.files);
   ui.clearBtn.onclick = () => clearDisplay(true);
-  ui.fieldSelect.onchange = zoomSelected;
+  ui.fieldSelect.onchange = onFieldChange;
   ui.zoomBtn.onclick = zoomSelected;
+  ui.showAllBtn.onclick = showAllFields;
 
   renderLegend();
 });
