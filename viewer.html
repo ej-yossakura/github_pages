@@ -9,11 +9,12 @@
   <script src="https://js.arcgis.com/4.34/"></script>
   <style>
     html, body, #app { height:100%; margin:0; font-family:system-ui,sans-serif; color:#1f2937; }
-    #app { display:grid; grid-template-columns:370px 1fr; }
+    #app { display:grid; grid-template-columns:380px 1fr; }
     #panel { padding:16px; overflow:auto; border-right:1px solid #cbd5e1; background:#fff; }
     #viewDiv { height:100%; }
     h1 { margin:0 0 6px; font-size:20px; }
     h2 { margin:18px 0 8px; font-size:15px; border-bottom:2px solid #007ac2; padding-bottom:4px; }
+    h3 { margin:12px 0 4px; font-size:12px; color:#35566f; }
     .small { font-size:12px; color:#64748b; line-height:1.5; }
     button, select, input { box-sizing:border-box; width:100%; margin-top:8px; padding:8px; font-size:13px; }
     button { border:0; border-radius:4px; background:#007ac2; color:#fff; cursor:pointer; }
@@ -21,12 +22,31 @@
     button:disabled { background:#94a3b8; cursor:default; }
     #dropZone { margin-top:12px; padding:24px 14px; border:2px dashed #7c8da0; border-radius:8px; text-align:center; background:#f8fafc; transition:.15s; }
     #dropZone.dragover { border-color:#007ac2; background:#eaf6fd; transform:scale(1.01); }
-    #status { white-space:pre-wrap; min-height:44px; padding:10px; border-radius:4px; background:#f1f5f9; font-size:12px; }
+    #status, #statsStatus { white-space:pre-wrap; min-height:44px; padding:10px; border-radius:4px; background:#f1f5f9; font-size:12px; }
     .field-row { display:flex; align-items:center; gap:7px; margin:6px 0; font-size:12px; }
     .field-row input { width:auto; margin:0; }
     .legend-row { display:grid; grid-template-columns:25px 28px 1fr; gap:7px; align-items:start; margin:7px 0; font-size:12px; }
-    .swatch { width:21px; height:14px; border:1px solid #475569; margin-top:2px; }
-    @media(max-width:780px){ #app{grid-template-columns:1fr;grid-template-rows:auto 1fr} #panel{max-height:48vh;border-right:0;border-bottom:1px solid #cbd5e1} }
+    .swatch { display:inline-block; width:21px; height:14px; border:1px solid #475569; margin-top:2px; vertical-align:middle; }
+
+    /* 統計タブ */
+    .tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+    .tabs button { margin:0; padding:7px 4px; font-size:12px; background:#fff; color:#1f2937; border:1px solid #c3ccd6; }
+    .tabs button:hover:not(.active) { background:#eef5fb; border-color:#007ac2; }
+    .tabs button.active { background:#007ac2; color:#fff; border-color:#007ac2; font-weight:600; }
+
+    /* 統計テーブル */
+    table.grid { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+    table.grid th, table.grid td { border:1px solid #d7dde3; padding:4px 5px; text-align:center; }
+    table.grid th { background:#eef2f6; font-weight:600; }
+    table.grid td.num { text-align:right; }
+    table.grid tr.total td { background:#eef2f6; font-weight:600; }
+
+    dl.summary { margin:8px 0 0; display:grid; grid-template-columns:1fr auto; gap:3px 10px; font-size:12px; }
+    dl.summary dt { color:#64748b; }
+    dl.summary dd { margin:0; text-align:right; font-weight:600; }
+    dl.summary dt.divider, dl.summary dd.divider { border-top:1px solid #d7dde3; margin-top:4px; padding-top:5px; }
+
+    @media(max-width:790px){ #app{grid-template-columns:1fr;grid-template-rows:auto 1fr} #panel{max-height:48vh;border-right:0;border-bottom:1px solid #cbd5e1} }
   </style>
 </head>
 <body>
@@ -40,6 +60,7 @@
       <span class="small">または下のボタンから選択<br>TASKDATA.XML と GRD*.bin の複数選択にも対応</span>
       <input id="files" type="file" multiple accept=".zip,.xml,.bin,.txt">
     </div>
+
     <button id="loadBtn">読み込んで表示</button>
     <button id="clearBtn" class="secondary">表示をクリア</button>
 
@@ -55,6 +76,14 @@
 
     <h2>TZN凡例</h2>
     <div id="legend"></div>
+
+    <h2>散布量の統計</h2>
+    <div class="tabs">
+      <button type="button" id="statsFieldTab" class="active">選択圃場</button>
+      <button type="button" id="statsAllTab">全圃場</button>
+    </div>
+    <div id="statsContent"></div>
+    <div id="statsStatus">ISOXMLを読み込んでください。</div>
   </aside>
   <main id="viewDiv"></main>
 </div>
@@ -66,13 +95,14 @@ require([
   "esri/layers/GraphicsLayer",
   "esri/Graphic",
   "esri/geometry/Polygon",
+  "esri/geometry/geometryEngine",
   "esri/widgets/BasemapGallery",
   "esri/widgets/Expand",
   "esri/widgets/Home",
   "esri/widgets/Legend",
   "esri/widgets/LayerList"
 ], function (
-  ArcGISMap, MapView, GraphicsLayer, Graphic, Polygon,
+  ArcGISMap, MapView, GraphicsLayer, Graphic, Polygon, geometryEngine,
   BasemapGallery, Expand, Home, Legend, LayerList
 ) {
   "use strict";
@@ -82,23 +112,36 @@ require([
     3:[116,196,118,.72], 4:[254,178,76,.76], 5:[222,45,38,.76]
   };
 
+  const TZN_MIN = 0;
+  const TZN_MAX = 5;
+
+  // mg/m² から kg/10a
+  //   1 kg/10a = 1000 mg/m²
+  const PDV_TO_KG_PER_10A = 0.001;
+
+  // mg/m² から kg/ha
+  const PDV_TO_KG_PER_HA = 0.01;
+
   const gridLayer = new GraphicsLayer({ title:"ISOXML Grid" });
   const map = new ArcGISMap({ basemap:"topo-vector", layers:[gridLayer] });
   const view = new MapView({ container:"viewDiv", map, center:[138,37], zoom:5 });
 
   view.ui.add(new Home({view}), "top-left");
+
   view.ui.add(new Expand({
     view,
     content:new BasemapGallery({view}),
     expandTooltip:"ベースマップ",
     expandIcon:"basemap"
   }), "top-right");
+
   view.ui.add(new Expand({
     view,
     content:new LayerList({view}),
     expandTooltip:"レイヤー",
     expandIcon:"layers"
   }), "top-right");
+
   view.ui.add(new Expand({
     view,
     content:new Legend({view}),
@@ -115,15 +158,25 @@ require([
     fieldSelect:document.getElementById("fieldSelect"),
     zoomBtn:document.getElementById("zoomBtn"),
     fields:document.getElementById("fields"),
-    legend:document.getElementById("legend")
+    legend:document.getElementById("legend"),
+    statsFieldTab:document.getElementById("statsFieldTab"),
+    statsAllTab:document.getElementById("statsAllTab"),
+    statsContent:document.getElementById("statsContent"),
+    statsStatus:document.getElementById("statsStatus")
   };
 
   const tasks = new globalThis.Map();
   let droppedFiles = null;
+  let statsScope = "field";
 
   function status(message, isError=false) {
     ui.status.textContent = message;
     ui.status.style.color = isError ? "#b91c1c" : "";
+  }
+
+  function statsStatus(message, isError=false) {
+    ui.statsStatus.textContent = message;
+    ui.statsStatus.style.color = isError ? "#b91c1c" : "";
   }
 
   function baseName(path) {
@@ -192,15 +245,18 @@ require([
   }
 
   function formatNumber(value, decimals) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+      return "—";
+    }
     return Number(value).toLocaleString("ja-JP", {
-      minimumFractionDigits:decimals,
-      maximumFractionDigits:decimals
+      minimumFractionDigits:decimals || 0,
+      maximumFractionDigits:decimals || 0
     });
   }
 
   function renderLegend(info=null) {
     ui.legend.innerHTML = "";
-    for (let zone=0; zone<=5; zone++) {
+    for (let zone=TZN_MIN; zone<=TZN_MAX; zone++) {
       const row = document.createElement("div");
       row.className = "legend-row";
       const swatch = document.createElement("span");
@@ -237,6 +293,434 @@ require([
     };
   }
 
+  // ==========================================================
+  // 統計
+  //
+  //  セル面積は測地面積から求める。
+  //  散布量(kg) = PDV(mg/m²) × 面積(m²) ÷ 1,000,000
+  // ==========================================================
+
+  // 圃場ごとの統計を集計する
+  function summarize(info) {
+
+    const zones = {};
+
+    for (let zone=TZN_MIN; zone<=TZN_MAX; zone++) {
+      zones[zone] = { count:0, pdv:info.values[zone] ?? null };
+    }
+
+    // セル数を TZN 別に数える
+    info.graphics.forEach(graphic => {
+      const zone = Number(graphic.attributes.tzn);
+      if (zones[zone]) {
+        zones[zone].count += 1;
+      }
+    });
+
+    const totalCells = info.graphics.length;
+    const cellArea = info.cellArea;
+    const totalArea = cellArea ? totalCells * cellArea : null;
+
+    let appliedCells = 0;
+    let totalAmount = 0;
+    let hasAmount = false;
+    const rates = [];
+
+    for (let zone=TZN_MIN; zone<=TZN_MAX; zone++) {
+
+      const entry = zones[zone];
+
+      entry.area = cellArea ? entry.count * cellArea : null;
+      entry.ratio = totalCells ? (entry.count / totalCells) * 100 : 0;
+
+      // TZN 0 は散布なし
+      if (zone === 0 || !entry.count) {
+        entry.amount = null;
+        entry.rate = null;
+        entry.rate10a = null;
+        continue;
+      }
+
+      appliedCells += entry.count;
+
+      if (entry.pdv === null || !Number.isFinite(entry.pdv) || !cellArea) {
+        entry.amount = null;
+        entry.rate = null;
+        entry.rate10a = null;
+        continue;
+      }
+
+      entry.amount = (entry.pdv * entry.area) / 1000000;
+      entry.rate = entry.pdv * PDV_TO_KG_PER_HA;
+      entry.rate10a = entry.pdv * PDV_TO_KG_PER_10A;
+
+      totalAmount += entry.amount;
+      hasAmount = true;
+
+      rates.push(entry.rate);
+    }
+
+    const appliedArea = cellArea ? appliedCells * cellArea : null;
+
+    const averageRate = (hasAmount && appliedArea)
+      ? totalAmount / (appliedArea / 10000)
+      : null;
+
+    return {
+      label: info.name,
+      cellArea: cellArea,
+      totalCells: totalCells,
+      totalArea: totalArea,
+      appliedCells: appliedCells,
+      appliedArea: appliedArea,
+      appliedRatio: totalCells ? (appliedCells / totalCells) * 100 : 0,
+      totalAmount: hasAmount ? totalAmount : null,
+      averageRate: averageRate,
+      averageRate10a: averageRate !== null ? averageRate / 10 : null,
+      minRate: rates.length ? Math.min.apply(null, rates) : null,
+      maxRate: rates.length ? Math.max.apply(null, rates) : null,
+      zones: zones
+    };
+  }
+
+  // 定義リストを作る
+  function buildSummaryList(rows) {
+
+    const list = document.createElement("dl");
+    list.className = "summary";
+
+    rows.forEach(row => {
+
+      const term = document.createElement("dt");
+      term.textContent = row[0];
+
+      const value = document.createElement("dd");
+      value.textContent = row[1];
+
+      if (row[2]) {
+        term.className = "divider";
+        value.className = "divider";
+      }
+
+      list.append(term, value);
+    });
+
+    return list;
+  }
+
+  // 圃場の統計を描画する
+  function renderFieldStats(summary) {
+
+    const container = document.createElement("div");
+
+    container.append(buildSummaryList([
+      ["圃場", summary.label, false],
+      ["セル数", formatNumber(summary.totalCells) + " 個", false],
+      ["セル面積", summary.cellArea
+        ? formatNumber(summary.cellArea, 1) + " m²" : "—", false],
+      ["圃場面積", summary.totalArea
+        ? formatNumber(summary.totalArea / 10000, 2) + " ha" : "—", false],
+      ["散布面積", summary.appliedArea
+        ? formatNumber(summary.appliedArea / 10000, 2) + " ha（" +
+          formatNumber(summary.appliedRatio, 1) + "%）" : "—", true],
+      ["総散布量", summary.totalAmount !== null
+        ? formatNumber(summary.totalAmount, 1) + " kg" : "—", false],
+      ["平均散布量", summary.averageRate !== null
+        ? formatNumber(summary.averageRate, 1) + " kg/ha" : "—", false],
+      ["　（10a 換算）", summary.averageRate10a !== null
+        ? formatNumber(summary.averageRate10a, 2) + " kg/10a" : "—", false],
+      ["最小・最大", summary.minRate !== null
+        ? formatNumber(summary.minRate, 1) + " ～ " +
+          formatNumber(summary.maxRate, 1) + " kg/ha" : "—", false]
+    ]));
+
+    const heading = document.createElement("h3");
+    heading.textContent = "TZN 別の内訳";
+    container.append(heading);
+
+    const table = document.createElement("table");
+    table.className = "grid";
+
+    const head = document.createElement("thead");
+    head.innerHTML =
+      "<tr>" +
+      "<th style='width:24px;'></th>" +
+      "<th style='width:28px;'>TZN</th>" +
+      "<th>面積<br>(ha)</th>" +
+      "<th>割合</th>" +
+      "<th>散布量<br>(kg/10a)</th>" +
+      "<th>小計<br>(kg)</th>" +
+      "</tr>";
+
+    const body = document.createElement("tbody");
+
+    for (let zone=TZN_MIN; zone<=TZN_MAX; zone++) {
+
+      const entry = summary.zones[zone];
+      const row = document.createElement("tr");
+
+      const colorCell = document.createElement("td");
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = `rgba(${COLORS[zone].join(",")})`;
+      colorCell.append(swatch);
+
+      const zoneCell = document.createElement("td");
+      zoneCell.textContent = zone;
+
+      const areaCell = document.createElement("td");
+      areaCell.className = "num";
+      areaCell.textContent = entry.area
+        ? formatNumber(entry.area / 10000, 2) : "—";
+
+      const ratioCell = document.createElement("td");
+      ratioCell.className = "num";
+      ratioCell.textContent = formatNumber(entry.ratio, 1) + "%";
+
+      const rateCell = document.createElement("td");
+      rateCell.className = "num";
+      rateCell.textContent = entry.rate10a !== null
+        ? formatNumber(entry.rate10a, 2) : "—";
+
+      const amountCell = document.createElement("td");
+      amountCell.className = "num";
+      amountCell.textContent = entry.amount !== null
+        ? formatNumber(entry.amount, 1) : "—";
+
+      row.append(colorCell, zoneCell, areaCell, ratioCell, rateCell, amountCell);
+      body.append(row);
+    }
+
+    // 合計行
+    const totalRow = document.createElement("tr");
+    totalRow.className = "total";
+
+    const labelCell = document.createElement("td");
+    labelCell.colSpan = 2;
+    labelCell.textContent = "計";
+
+    const totalAreaCell = document.createElement("td");
+    totalAreaCell.className = "num";
+    totalAreaCell.textContent = summary.totalArea
+      ? formatNumber(summary.totalArea / 10000, 2) : "—";
+
+    const totalRatioCell = document.createElement("td");
+    totalRatioCell.className = "num";
+    totalRatioCell.textContent = "100%";
+
+    const averageCell = document.createElement("td");
+    averageCell.className = "num";
+    averageCell.textContent = summary.averageRate10a !== null
+      ? formatNumber(summary.averageRate10a, 2) : "—";
+
+    const totalAmountCell = document.createElement("td");
+    totalAmountCell.className = "num";
+    totalAmountCell.textContent = summary.totalAmount !== null
+      ? formatNumber(summary.totalAmount, 1) : "—";
+
+    totalRow.append(labelCell, totalAreaCell, totalRatioCell,
+      averageCell, totalAmountCell);
+    body.append(totalRow);
+
+    table.append(head, body);
+    container.append(table);
+
+    return container;
+  }
+
+  // 全圃場の統計を描画する
+  function renderAllStats(summaries) {
+
+    const container = document.createElement("div");
+
+    let totalCells = 0;
+    let totalArea = 0;
+    let appliedArea = 0;
+    let totalAmount = 0;
+    let hasArea = false;
+    let hasAmount = false;
+    let unsetFields = 0;
+
+    summaries.forEach(summary => {
+
+      totalCells += summary.totalCells;
+
+      if (summary.totalArea) {
+        totalArea += summary.totalArea;
+        hasArea = true;
+      }
+
+      if (summary.appliedArea) {
+        appliedArea += summary.appliedArea;
+      }
+
+      if (summary.totalAmount !== null) {
+        totalAmount += summary.totalAmount;
+        hasAmount = true;
+      } else {
+        unsetFields += 1;
+      }
+    });
+
+    const averageRate = (hasAmount && appliedArea)
+      ? totalAmount / (appliedArea / 10000)
+      : null;
+
+    const rows = [
+      ["圃場数", formatNumber(summaries.length) + " 圃場", false],
+      ["総セル数", formatNumber(totalCells) + " 個", false],
+      ["総面積", hasArea
+        ? formatNumber(totalArea / 10000, 2) + " ha" : "—", false],
+      ["散布面積", appliedArea
+        ? formatNumber(appliedArea / 10000, 2) + " ha（" +
+          formatNumber(totalArea ? (appliedArea / totalArea) * 100 : 0, 1) +
+          "%）" : "—", true],
+      ["総散布量", hasAmount
+        ? formatNumber(totalAmount, 1) + " kg" : "—", false],
+      ["平均散布量", averageRate !== null
+        ? formatNumber(averageRate, 1) + " kg/ha" : "—", false],
+      ["　（10a 換算）", averageRate !== null
+        ? formatNumber(averageRate / 10, 2) + " kg/10a" : "—", false]
+    ];
+
+    if (unsetFields) {
+      rows.push(["PDV 未設定", formatNumber(unsetFields) + " 圃場", false]);
+    }
+
+    container.append(buildSummaryList(rows));
+
+    const heading = document.createElement("h3");
+    heading.textContent = "圃場別の一覧";
+    container.append(heading);
+
+    const table = document.createElement("table");
+    table.className = "grid";
+
+    const head = document.createElement("thead");
+    head.innerHTML =
+      "<tr>" +
+      "<th>圃場</th>" +
+      "<th>面積<br>(ha)</th>" +
+      "<th>散布量<br>(kg)</th>" +
+      "<th>平均<br>(kg/10a)</th>" +
+      "</tr>";
+
+    const body = document.createElement("tbody");
+
+    summaries.forEach(summary => {
+
+      const row = document.createElement("tr");
+
+      const nameCell = document.createElement("td");
+      nameCell.textContent = summary.label;
+
+      const areaCell = document.createElement("td");
+      areaCell.className = "num";
+      areaCell.textContent = summary.totalArea
+        ? formatNumber(summary.totalArea / 10000, 2) : "—";
+
+      const amountCell = document.createElement("td");
+      amountCell.className = "num";
+      amountCell.textContent = summary.totalAmount !== null
+        ? formatNumber(summary.totalAmount, 1) : "—";
+
+      const rateCell = document.createElement("td");
+      rateCell.className = "num";
+      rateCell.textContent = summary.averageRate10a !== null
+        ? formatNumber(summary.averageRate10a, 2) : "—";
+
+      row.append(nameCell, areaCell, amountCell, rateCell);
+      body.append(row);
+    });
+
+    const totalRow = document.createElement("tr");
+    totalRow.className = "total";
+
+    const labelCell = document.createElement("td");
+    labelCell.textContent = "計";
+
+    const totalAreaCell = document.createElement("td");
+    totalAreaCell.className = "num";
+    totalAreaCell.textContent = hasArea
+      ? formatNumber(totalArea / 10000, 2) : "—";
+
+    const totalAmountCell = document.createElement("td");
+    totalAmountCell.className = "num";
+    totalAmountCell.textContent = hasAmount
+      ? formatNumber(totalAmount, 1) : "—";
+
+    const averageCell = document.createElement("td");
+    averageCell.className = "num";
+    averageCell.textContent = averageRate !== null
+      ? formatNumber(averageRate / 10, 2) : "—";
+
+    totalRow.append(labelCell, totalAreaCell, totalAmountCell, averageCell);
+    body.append(totalRow);
+
+    table.append(head, body);
+    container.append(table);
+
+    return container;
+  }
+
+  // 統計を更新する
+  function refreshStats() {
+
+    ui.statsContent.innerHTML = "";
+
+    if (!tasks.size) {
+      statsStatus("ISOXMLを読み込んでください。");
+      return;
+    }
+
+    if (statsScope === "field") {
+
+      const info = tasks.get(ui.fieldSelect.value);
+
+      if (!info) {
+        statsStatus("圃場を選択してください。");
+        return;
+      }
+
+      const summary = summarize(info);
+
+      ui.statsContent.append(renderFieldStats(summary));
+
+      statsStatus(summary.cellArea
+        ? "集計しました。"
+        : "セル面積を取得できないため、面積と散布量は表示できません。",
+        !summary.cellArea);
+
+      return;
+    }
+
+    // 全圃場
+    const summaries = Array.from(tasks.values()).map(summarize);
+
+    ui.statsContent.append(renderAllStats(summaries));
+
+    statsStatus(summaries.length + " 圃場を集計しました。");
+  }
+
+  function setStatsScope(scope) {
+
+    statsScope = scope;
+
+    const isField = scope === "field";
+
+    ui.statsFieldTab.className = isField ? "active" : "";
+    ui.statsAllTab.className = isField ? "" : "active";
+
+    refreshStats();
+  }
+
+  ui.statsFieldTab.onclick = () => setStatsScope("field");
+  ui.statsAllTab.onclick = () => setStatsScope("all");
+
+  // ==========================================================
+  // 読み込みと描画
+  // ==========================================================
+
   async function renderFiles(fileList) {
     try {
       status("読み込み中...");
@@ -251,6 +735,7 @@ require([
       if (!taskNodes.length) throw new Error("GRDを持つTSKが見つかりません。");
 
       let total = 0;
+
       for (const task of taskNodes) {
         const grd = task.querySelector(":scope > GRD");
         const name = taskName(task,doc);
@@ -273,6 +758,10 @@ require([
 
         const graphics = [];
         const taskId = task.getAttribute("A") || gridName;
+
+        // セルの測地面積（1セル分だけ求めれば十分）
+        let cellArea = null;
+
         for (let row=0; row<rows; row++) {
           for (let col=0; col<cols; col++) {
             const index = row * cols + col;
@@ -283,6 +772,13 @@ require([
               spatialReference:{wkid:4326},
               rings:[[[x0,y0],[x0+dx,y0],[x0+dx,y0+dy],[x0,y0+dy],[x0,y0]]]
             });
+
+            if (cellArea === null) {
+              cellArea = Math.abs(
+                geometryEngine.geodesicArea(geometry, "square-meters")
+              );
+            }
+
             const graphic = new Graphic({
               geometry,
               symbol:symbol(zone),
@@ -303,7 +799,17 @@ require([
           }
         }
 
-        tasks.set(taskId,{name,graphics,values:pdv.values,vpnIds:pdv.vpnIds,vpns});
+        tasks.set(taskId,{
+          name,
+          graphics,
+          values:pdv.values,
+          vpnIds:pdv.vpnIds,
+          vpns,
+          cellArea,
+          cols,
+          rows
+        });
+
         const option = document.createElement("option");
         option.value = taskId;
         option.textContent = `${name} (${cols} × ${rows})`;
@@ -324,6 +830,10 @@ require([
       ui.zoomBtn.disabled = false;
       if (gridLayer.graphics.length) await view.goTo(gridLayer.graphics.toArray(),{padding:40});
       status(`読込完了\n圃場: ${taskNodes.length}\nセル: ${total}`);
+
+      // 読込後は全圃場の統計を表示する
+      setStatsScope("all");
+
     } catch (error) {
       console.error(error);
       status(`エラー: ${error.message || error}`,true);
@@ -336,6 +846,9 @@ require([
     await view.goTo(info.graphics,{padding:60});
     renderLegend(info);
     status(`選択圃場: ${info.name}\nセル: ${info.graphics.length}`);
+
+    // 選択圃場タブへ切り替えて統計を更新する
+    setStatsScope("field");
   }
 
   function clearDisplay(updateStatus=true) {
@@ -345,7 +858,9 @@ require([
     ui.fieldSelect.disabled = true;
     ui.zoomBtn.disabled = true;
     ui.fields.innerHTML = "";
+    ui.statsContent.innerHTML = "";
     renderLegend();
+    statsStatus("ISOXMLを読み込んでください。");
     if (updateStatus) status("表示をクリアしました。");
   }
 
