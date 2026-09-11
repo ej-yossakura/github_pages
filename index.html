@@ -151,113 +151,6 @@
       color: #5f6b7a;
     }
 
-    /* 選択モード切替 */
-    .mode-buttons {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin-top: 6px;
-    }
-
-    .mode-buttons button {
-      margin: 0;
-      padding: 7px 4px;
-      font-size: 12px;
-      background: #fff;
-      color: #1f2937;
-      border: 1px solid #c3ccd6;
-    }
-
-    .mode-buttons button:hover:not(.active) {
-      background: #eef5fb;
-      border-color: #007ac2;
-    }
-
-    .mode-buttons button.active {
-      background: #007ac2;
-      color: #fff;
-      border-color: #007ac2;
-      font-weight: 600;
-    }
-
-    /* TZN 選択ボタン */
-    .tzn-buttons {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      margin-top: 6px;
-    }
-
-    .tzn-buttons button {
-      margin: 0;
-      padding: 6px 4px;
-      font-size: 12px;
-      background: #fff;
-      color: #1f2937;
-      border: 1px solid #c3ccd6;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-    }
-
-    .tzn-buttons button:hover:not(:disabled) {
-      background: #eef5fb;
-      border-color: #007ac2;
-    }
-
-    .tzn-buttons button.selected {
-      background: #007ac2;
-      color: #fff;
-      border-color: #007ac2;
-    }
-
-    .tzn-buttons button:disabled {
-      background: #f1f3f5;
-      color: #9ca3af;
-    }
-
-    /* セル編集パネル */
-    #cellEditorPanel {
-      background: #fff;
-      border: 1px solid #b8c2cc;
-      border-radius: 4px;
-      padding: 12px;
-      width: 250px;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
-      font-size: 12px;
-    }
-
-    #cellEditorPanel h3 {
-      margin: 0 0 8px;
-      font-size: 13px;
-    }
-
-    #cellEditorPanel .hint {
-      color: #5f6b7a;
-      line-height: 1.5;
-    }
-
-    #selectionInfo {
-      margin-top: 8px;
-      padding: 8px;
-      background: #f3f4f6;
-      border-radius: 4px;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      min-height: 18px;
-    }
-
-    .btn-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-    }
-
-    .btn-row button {
-      margin-top: 0;
-    }
-
     @media (max-width: 780px) {
       #app {
         grid-template-columns: 1fr;
@@ -321,11 +214,10 @@
       <section id="cellSection" class="section">
         <h2>5. TZN の編集</h2>
         <p class="small">
-          地図上のセルを選択し、TZN を一括で変更します。
-          個別選択と矩形選択を切り替えできます。
+          地図右上の編集ボタンからセルを選択し、TZN を変更します。
+          複数選択にも対応しています。
         </p>
-        <button id="cellEditToggle">TZN 編集モードを開始</button>
-        <div id="cellStatus" class="info-box">TZN 編集モードは停止中です。</div>
+        <div id="cellStatus" class="info-box">レイヤーを選択すると利用できます。</div>
       </section>
 
       <!-- ========== 6. PDV編集 ========== -->
@@ -369,45 +261,16 @@
     <main id="viewDiv"></main>
   </div>
 
-  <!-- TZN 編集パネル（地図上に配置） -->
-  <div id="cellEditorPanel" style="display:none;">
-    <h3>TZN の一括編集</h3>
-
-    <label class="small">選択モード</label>
-    <div class="mode-buttons" id="modeButtons">
-      <button type="button" id="modeSingleBtn" class="active">個別選択</button>
-      <button type="button" id="modeRectBtn">矩形選択</button>
-    </div>
-    <p class="hint" id="modeHint">
-      セルをクリックで選択します。Ctrl キーを押しながらクリックすると追加選択します。
-    </p>
-
-    <div id="selectionInfo">セルが選択されていません。</div>
-
-    <label class="small">TZN を設定</label>
-    <div class="tzn-buttons" id="tznButtons"></div>
-
-    <div class="btn-row" style="margin-top:10px;">
-      <button id="selectionClearBtn" class="secondary">選択解除</button>
-      <button id="cellCloseBtn" class="secondary">閉じる</button>
-    </div>
-
-    <div id="cellEditStatus" class="info-box">セルを選択してください。</div>
-  </div>
-
   <script>
     require([
       "esri/Map",
       "esri/WebMap",
       "esri/views/MapView",
-      "esri/Graphic",
-      "esri/geometry/Polygon",
-      "esri/geometry/Extent",
-      "esri/layers/GraphicsLayer",
       "esri/identity/OAuthInfo",
       "esri/identity/IdentityManager",
       "esri/portal/Portal",
       "esri/portal/PortalQueryParams",
+      "esri/widgets/Editor",
       "esri/widgets/LayerList",
       "esri/widgets/Legend",
       "esri/widgets/BasemapGallery",
@@ -418,14 +281,11 @@
       ArcGISMap,
       WebMap,
       MapView,
-      Graphic,
-      Polygon,
-      Extent,
-      GraphicsLayer,
       OAuthInfo,
       esriId,
       Portal,
       PortalQueryParams,
+      Editor,
       LayerList,
       Legend,
       BasemapGallery,
@@ -538,18 +398,7 @@
         fieldStatus: dom("fieldStatus"),
 
         cellSection: dom("cellSection"),
-        cellEditToggle: dom("cellEditToggle"),
         cellStatus: dom("cellStatus"),
-
-        cellEditorPanel: dom("cellEditorPanel"),
-        modeSingleBtn: dom("modeSingleBtn"),
-        modeRectBtn: dom("modeRectBtn"),
-        modeHint: dom("modeHint"),
-        selectionInfo: dom("selectionInfo"),
-        tznButtons: dom("tznButtons"),
-        selectionClearBtn: dom("selectionClearBtn"),
-        cellCloseBtn: dom("cellCloseBtn"),
-        cellEditStatus: dom("cellEditStatus"),
 
         pdvSection: dom("pdvSection"),
         pdvTableBody: dom("pdvTableBody"),
@@ -573,13 +422,8 @@
         currentField: null,
 
         // TZN 編集
-        cellEditMode: false,
-        // "single" または "rect"
-        selectMode: "single",
-        handles: [],
-        // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
-        selection: new globalThis.Map(),
-        dragOrigin: null
+        editor: null,
+        editorExpand: null
       };
 
       function setStatus(element, message, isError) {
@@ -608,21 +452,8 @@
       // マップ初期化
       // ==========================================================
 
-      // 選択セルのハイライト用
-      const selectionLayer = new GraphicsLayer({
-        title: "選択中のセル",
-        listMode: "hide"
-      });
-
-      // 矩形選択のラバーバンド用
-      const rubberBandLayer = new GraphicsLayer({
-        title: "矩形選択",
-        listMode: "hide"
-      });
-
       let map = new ArcGISMap({
-        basemap: "topo-vector",
-        layers: [selectionLayer, rubberBandLayer]
+        basemap: "topo-vector"
       });
 
       const view = new MapView({
@@ -680,9 +511,6 @@
           }),
           "top-right"
         );
-
-        // TZN 編集パネルを地図右下へ配置
-        view.ui.add(ui.cellEditorPanel, "bottom-right");
       }
 
       setupWidgets();
@@ -853,17 +681,12 @@
 
           setStatus(ui.webmapStatus, "読み込み中: " + item.title);
 
-          stopCellEdit();
+          removeEditor();
 
           const webmap = new WebMap({ portalItem: item });
 
           await webmap.load();
           await webmap.loadAll();
-
-          selectionLayer.removeAll();
-          rubberBandLayer.removeAll();
-          webmap.add(selectionLayer);
-          webmap.add(rubberBandLayer);
 
           view.map = webmap;
           map = webmap;
@@ -979,7 +802,7 @@
 
         const index = ui.rxLayerSelect.value;
 
-        stopCellEdit();
+        removeEditor();
 
         if (index === "") {
           [ui.fieldSection, ui.cellSection, ui.pdvSection, ui.exportSection]
@@ -996,6 +819,7 @@
           state.resolved = resolveAllFields(state.rxLayer);
 
           applyTznRenderer(state.rxLayer);
+          setupEditor(state.rxLayer);
 
           const editable = Boolean(
             state.rxLayer.capabilities &&
@@ -1179,9 +1003,6 @@
 
         const fieldId = ui.fieldSelect.value;
 
-        // 圃場が変わったら選択を解除
-        clearSelection();
-
         if (!fieldId) {
           state.currentField = null;
           ui.zoomFieldBtn.disabled = true;
@@ -1207,688 +1028,167 @@
       // ==========================================================
       // 5. TZN の編集
       //
-      //  複数フィーチャを選択して TZN を一括変更する。
-      //  クリック選択、Ctrl/Shift クリックで追加選択、
-      //  Shift ドラッグで矩形選択に対応する。
+      //  ArcGIS Maps SDK の Editor ウィジェットを使用する。
+      //  TZN のみ編集可能とし、ジオメトリ編集と追加削除は行わない。
       // ==========================================================
 
-      // TZN 設定ボタンを構築
-      function buildTznButtons() {
+      // レイヤーに指定フィールドが存在するか
+      function layerHasField(featureLayer, fieldName) {
 
-        ui.tznButtons.innerHTML = "";
-
-        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
-
-          const button = document.createElement("button");
-          button.type = "button";
-          button.id = "tznButton" + zone;
-          button.disabled = true;
-          button.title = CONFIG.tznLabels[zone];
-
-          const swatch = document.createElement("span");
-          swatch.className = "swatch";
-          swatch.style.background = rgba(zone);
-
-          const label = document.createElement("span");
-          label.textContent = zone;
-
-          button.append(swatch, label);
-
-          button.onclick = function () {
-            applyTznToSelection(zone);
-          };
-
-          ui.tznButtons.append(button);
+        if (!fieldName || !featureLayer.fields) {
+          return false;
         }
-      }
 
-      buildTznButtons();
-
-      function setTznButtonsEnabled(enabled) {
-        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
-          dom("tznButton" + zone).disabled = !enabled;
-        }
-      }
-
-      // 選択ハイライトを再描画
-      function refreshSelectionGraphics() {
-
-        selectionLayer.removeAll();
-
-        state.selection.forEach(function (item) {
-
-          if (!item.geometry) {
-            return;
-          }
-
-          selectionLayer.add(new Graphic({
-            geometry: item.geometry,
-            symbol: {
-              type: "simple-fill",
-              color: CONFIG.selectionColor,
-              outline: {
-                color: CONFIG.selectionOutline,
-                width: 1.6
-              }
-            }
-          }));
+        return featureLayer.fields.some(function (field) {
+          return field.name === fieldName;
         });
       }
 
-      // 選択情報の表示を更新
-      function updateSelectionInfo() {
-
-        const count = state.selection.size;
-
-        if (!count) {
-          ui.selectionInfo.textContent = "セルが選択されていません。";
-          setTznButtonsEnabled(false);
-          return;
-        }
-
-        // 選択中セルの TZN 内訳
-        const counts = {};
-
-        state.selection.forEach(function (item) {
-          const zone = Number(item.attributes[state.resolved.tzn]);
-          counts[zone] = (counts[zone] || 0) + 1;
-        });
-
-        const parts = Object.keys(counts)
-          .sort(function (a, b) { return Number(a) - Number(b); })
-          .map(function (zone) {
-            return "TZN " + zone + ": " + counts[zone] + " 件";
-          });
-
-        ui.selectionInfo.textContent =
-          "選択セル数: " + count + "\n" + parts.join("\n");
-
-        setTznButtonsEnabled(true);
-      }
-
-      function clearSelection() {
-        state.selection.clear();
-        selectionLayer.removeAll();
-        updateSelectionInfo();
-      }
-
-      // 選択へ追加または解除
-      function toggleSelection(features, additive) {
-
-        if (!additive) {
-          state.selection.clear();
-        }
-
-        features.forEach(function (feature) {
-
-          const objectId = feature.attributes[state.rxLayer.objectIdField];
-
-          if (additive && state.selection.has(objectId)) {
-            // 追加選択モードで既に選択済みなら解除
-            state.selection.delete(objectId);
-            return;
-          }
-
-          state.selection.set(objectId, {
-            objectId: objectId,
-            attributes: feature.attributes,
-            geometry: feature.geometry
-          });
-        });
-
-        refreshSelectionGraphics();
-        updateSelectionInfo();
-      }
-
-      // ジオメトリ範囲でセルを問い合わせ
+      // 編集フォームの定義
       //
-      //  表示範囲内であればクライアント側の queryFeatures を用いる。
-      //  取得できない場合はサービスへ問い合わせる。
-      async function queryCellsByGeometry(geometry) {
+      //  editableExpression には Arcade 式の名前を指定する。
+      //  文字列リテラルを直接渡すとフォームの読み込みに失敗する。
+      function buildFormTemplate(featureLayer) {
 
-        const outFields = [
-          state.rxLayer.objectIdField,
-          state.resolved.fieldId,
-          state.resolved.tzn,
-          state.resolved.pdv
-        ];
+        const elements = [];
 
-        const where = state.currentField
-          ? fieldWhereClause(state.currentField)
-          : "1=1";
-
-        // クライアント側のクエリを試す
-        try {
-
-          const layerView = await view.whenLayerView(state.rxLayer);
-
-          // タイルの読み込み完了を待つ
-          await reactiveWatch(function () {
-            return layerView.updating === false;
+        // TZN は編集可能
+        if (layerHasField(featureLayer, state.resolved.tzn)) {
+          elements.push({
+            type: "field",
+            fieldName: state.resolved.tzn,
+            label: "TZN（0～5）",
+            description: "0 は散布なし"
           });
-
-          const clientQuery = layerView.createQuery();
-          clientQuery.geometry = geometry;
-          clientQuery.spatialRelationship = "intersects";
-          clientQuery.where = where;
-          clientQuery.outFields = outFields;
-          clientQuery.returnGeometry = true;
-
-          const clientResult = await layerView.queryFeatures(clientQuery);
-
-          if (clientResult.features.length) {
-            return clientResult.features;
-          }
-
-        } catch (error) {
-          console.warn("クライアント側クエリに失敗しました。", error);
         }
 
-        // サービスへ問い合わせる
-        const query = state.rxLayer.createQuery();
-        query.geometry = geometry;
-        query.spatialRelationship = "intersects";
-        query.where = where;
-        query.outFields = outFields;
-        query.returnGeometry = true;
-        query.num = CONFIG.queryLimit;
+        // 参照のみの項目
+        [
+          { name: state.resolved.gridId, label: "グリッド ID" },
+          { name: state.resolved.fieldId, label: "圃場" },
+          { name: state.resolved.pdv, label: "PDV (mg/m²)" }
+        ].forEach(function (item) {
 
-        const result = await state.rxLayer.queryFeatures(query);
-
-        return result.features;
-      }
-
-      // 条件が満たされるまで待機する
-      function reactiveWatch(condition, timeout) {
-
-        return new Promise(function (resolve) {
-
-          if (condition()) {
-            resolve();
-            return;
+          if (layerHasField(featureLayer, item.name)) {
+            elements.push({
+              type: "field",
+              fieldName: item.name,
+              label: item.label,
+              editableExpression: "expr-readonly"
+            });
           }
-
-          const limit = Date.now() + (timeout || 5000);
-
-          const timer = setInterval(function () {
-
-            if (condition() || Date.now() > limit) {
-              clearInterval(timer);
-              resolve();
-            }
-
-          }, 100);
         });
+
+        if (!elements.length) {
+          return null;
+        }
+
+        return {
+          title: "施肥設計セルの編集",
+          expressionInfos: [{
+            name: "expr-readonly",
+            title: "読み取り専用",
+            expression: "false",
+            returnType: "boolean"
+          }],
+          elements: elements
+        };
       }
 
-      // クリックによる個別選択
-      async function onMapClickForTznEdit(event) {
+      function setupEditor(featureLayer) {
 
-        if (!state.cellEditMode || !state.rxLayer) {
-          return;
+        // 既存のウィジェットを破棄する
+        if (state.editorExpand) {
+          view.ui.remove(state.editorExpand);
+          state.editorExpand.destroy();
+          state.editorExpand = null;
         }
 
-        // 矩形選択モードではクリック選択を行わない
-        if (state.selectMode === "rect") {
-          return;
+        if (state.editor) {
+          state.editor.destroy();
+          state.editor = null;
         }
 
-        event.stopPropagation();
-
-        try {
-
-          setStatus(ui.cellEditStatus, "セルを取得中...");
-
-          const response = await view.hitTest(event, {
-            include: [state.rxLayer]
-          });
-
-          const hit = response.results.find(function (item) {
-            return item.graphic && item.graphic.layer === state.rxLayer;
-          });
-
-          const additive =
-            event.native &&
-            (event.native.ctrlKey || event.native.metaKey);
-
-          if (!hit) {
-
-            if (!additive) {
-              clearSelection();
-              setStatus(ui.cellEditStatus, "選択を解除しました。");
-            } else {
-              setStatus(ui.cellEditStatus, "セルが見つかりません。");
-            }
-
-            return;
-          }
-
-          const objectId = hit.graphic.attributes[state.rxLayer.objectIdField];
-
-          // 属性とジオメトリを確実に取得するため再クエリする
-          const query = state.rxLayer.createQuery();
-          query.objectIds = [objectId];
-          query.outFields = ["*"];
-          query.returnGeometry = true;
-
-          const result = await state.rxLayer.queryFeatures(query);
-
-          if (!result.features.length) {
-            setStatus(ui.cellEditStatus, "属性を取得できません。", true);
-            return;
-          }
-
-          toggleSelection(result.features, additive);
-
-          setStatus(
-            ui.cellEditStatus,
-            state.selection.size
-              ? "TZN ボタンで値を設定してください。"
-              : "選択を解除しました。"
-          );
-
-        } catch (error) {
-          console.error(error);
-          setStatus(ui.cellEditStatus, "取得に失敗しました: " + errorText(error), true);
-        }
-      }
-
-      // 2 点から矩形を作成
-      function makeExtent(origin, corner) {
-
-        return new Extent({
-          xmin: Math.min(origin.x, corner.x),
-          ymin: Math.min(origin.y, corner.y),
-          xmax: Math.max(origin.x, corner.x),
-          ymax: Math.max(origin.y, corner.y),
-          spatialReference: view.spatialReference
-        });
-      }
-
-      // ドラッグ中の矩形を描画
-      function drawRubberBand(extent) {
-
-        rubberBandLayer.removeAll();
-
-        if (!extent) {
-          return;
-        }
-
-        rubberBandLayer.add(new Graphic({
-          geometry: extent,
-          symbol: {
-            type: "simple-fill",
-            color: [0, 122, 194, 0.12],
-            outline: {
-              color: [0, 122, 194],
-              width: 1.5,
-              style: "dash"
-            }
-          }
-        }));
-      }
-
-      // 矩形ドラッグによる選択
-      //   矩形選択モードのときのみ動作する。
-      //   ArcGIS 標準の Shift ドラッグによるズームとは併用しない。
-      async function onMapDragForTznEdit(event) {
-
-        if (!state.cellEditMode || !state.rxLayer) {
-          return;
-        }
-
-        if (state.selectMode !== "rect") {
-          return;
-        }
-
-        // 地図のパンとズームを抑止する
-        event.stopPropagation();
-
-        if (event.action === "start") {
-
-          state.dragOrigin = { x: event.x, y: event.y };
-          drawRubberBand(null);
-          return;
-        }
-
-        if (event.action === "update") {
-
-          if (!state.dragOrigin) {
-            return;
-          }
-
-          const origin = view.toMap(state.dragOrigin);
-          const current = view.toMap({ x: event.x, y: event.y });
-
-          if (origin && current) {
-            drawRubberBand(makeExtent(origin, current));
-          }
-
-          return;
-        }
-
-        if (event.action === "end") {
-
-          const screenOrigin = state.dragOrigin;
-          state.dragOrigin = null;
-
-          drawRubberBand(null);
-
-          if (!screenOrigin) {
-            return;
-          }
-
-          // 画面座標での移動量を確認する
-          const deltaX = Math.abs(event.x - screenOrigin.x);
-          const deltaY = Math.abs(event.y - screenOrigin.y);
-
-          if (deltaX < 5 || deltaY < 5) {
-            setStatus(ui.cellEditStatus, "範囲が小さすぎます。もう少し広くドラッグしてください。");
-            return;
-          }
-
-          const origin = view.toMap(screenOrigin);
-          const corner = view.toMap({ x: event.x, y: event.y });
-
-          if (!origin || !corner) {
-            setStatus(ui.cellEditStatus, "座標を取得できません。", true);
-            return;
-          }
-
-          const extent = makeExtent(origin, corner);
-
-          try {
-
-            setStatus(ui.cellEditStatus, "範囲内のセルを取得中...");
-
-            const features = await queryCellsByGeometry(extent);
-
-            if (!features.length) {
-              setStatus(ui.cellEditStatus, "範囲内にセルがありません。");
-              return;
-            }
-
-            // 矩形選択は既存の選択へ追加する
-            toggleSelectionAdd(features);
-
-            setStatus(
-              ui.cellEditStatus,
-              features.length + " 件を選択に追加しました。"
-            );
-
-          } catch (error) {
-            console.error(error);
-            setStatus(ui.cellEditStatus, "取得に失敗しました: " + errorText(error), true);
-          }
-        }
-      }
-
-      // 選択モードの切り替え
-      function setSelectMode(mode) {
-
-        state.selectMode = mode;
-
-        state.dragOrigin = null;
-        drawRubberBand(null);
-
-        const isRect = mode === "rect";
-
-        ui.modeSingleBtn.className = isRect ? "" : "active";
-        ui.modeRectBtn.className = isRect ? "active" : "";
-
-        ui.modeHint.textContent = isRect
-          ? "地図上をドラッグして矩形範囲内のセルを追加選択します。"
-          : "セルをクリックで選択します。Ctrl キーを押しながらクリックすると追加選択します。";
-
-        // 矩形選択モードでは地図のドラッグ操作を止める
-        if (view.navigation) {
-
-          view.navigation.browserTouchPanEnabled = !isRect;
-          view.navigation.momentumEnabled = !isRect;
-
-          if (view.navigation.actionMap) {
-            view.navigation.actionMap.dragPrimary = isRect ? "none" : "pan";
-            view.navigation.actionMap.dragSecondary = isRect ? "none" : "rotate";
-          }
-        }
-
-        view.container.style.cursor = isRect ? "crosshair" : "";
-
-        setStatus(
-          ui.cellEditStatus,
-          isRect
-            ? "矩形選択モードです。ドラッグしてください。"
-            : "個別選択モードです。セルをクリックしてください。"
+        const editable = Boolean(
+          featureLayer.capabilities &&
+          featureLayer.capabilities.operations &&
+          featureLayer.capabilities.operations.supportsUpdate
         );
-      }
 
-      ui.modeSingleBtn.onclick = function () {
-        setSelectMode("single");
-      };
-
-      ui.modeRectBtn.onclick = function () {
-        setSelectMode("rect");
-      };
-
-      // 矩形選択用: 既存選択へ追加のみ行う
-      function toggleSelectionAdd(features) {
-
-        features.forEach(function (feature) {
-
-          const objectId = feature.attributes[state.rxLayer.objectIdField];
-
-          state.selection.set(objectId, {
-            objectId: objectId,
-            attributes: feature.attributes,
-            geometry: feature.geometry
-          });
-        });
-
-        refreshSelectionGraphics();
-        updateSelectionInfo();
-      }
-
-      // 選択中セルへ TZN を適用
-      async function applyTznToSelection(zone) {
-
-        if (!state.selection.size || !state.rxLayer) {
+        if (!editable) {
+          setStatus(
+            ui.cellStatus,
+            "このレイヤーは更新できません。\n編集可能な状態で共有してください。",
+            true
+          );
           return;
         }
 
-        try {
+        const layerInfo = {
+          layer: featureLayer,
+          enabled: true,
+          addEnabled: false,
+          updateEnabled: true,
+          deleteEnabled: false,
+          attributeUpdatesEnabled: true,
+          geometryUpdatesEnabled: false
+        };
 
-          setStatus(ui.cellEditStatus, "保存中...");
-          setTznButtonsEnabled(false);
+        // フォーム構成に失敗した場合は既定のフォームを使う
+        const formTemplate = buildFormTemplate(featureLayer);
 
-          const updates = [];
+        if (formTemplate) {
+          layerInfo.formTemplate = formTemplate;
+        }
 
-          state.selection.forEach(function (item) {
-
-            // 変更がある行のみ更新対象にする
-            if (Number(item.attributes[state.resolved.tzn]) === zone) {
-              return;
-            }
-
-            const attributes = {};
-            attributes[state.rxLayer.objectIdField] = item.objectId;
-            attributes[state.resolved.tzn] = zone;
-
-            // TZN 0 は散布なしのため PDV も 0 にする
-            if (zone === 0 && state.resolved.pdv) {
-              attributes[state.resolved.pdv] = 0;
-            }
-
-            updates.push({ attributes: attributes });
-          });
-
-          if (!updates.length) {
-            setTznButtonsEnabled(true);
-            setStatus(ui.cellEditStatus, "変更はありませんでした。");
-            return;
+        state.editor = new Editor({
+          view: view,
+          layerInfos: [layerInfo],
+          // ジオメトリ編集用のツールは表示しない
+          visibleElements: {
+            snappingControls: false,
+            createFeaturesSection: false
           }
+        });
 
-          const editResult = await state.rxLayer.applyEdits({
-            updateFeatures: updates
-          });
+        state.editorExpand = new Expand({
+          view: view,
+          content: state.editor,
+          expandTooltip: "TZN を編集",
+          expandIcon: "pencil"
+        });
 
-          const failed = editResult.updateFeatureResults.filter(function (item) {
-            return item.error;
-          });
+        view.ui.add(state.editorExpand, "top-right");
 
-          setTznButtonsEnabled(true);
-
-          if (failed.length) {
-
-            console.error(failed);
-
-            setStatus(
-              ui.cellEditStatus,
-              "一部の更新に失敗しました。\n成功: " +
-              (updates.length - failed.length) + " 件\n失敗: " +
-              failed.length + " 件\n" + errorText(failed[0].error),
-              true
-            );
-
-            return;
-          }
-
-          // 選択情報の属性を更新
-          state.selection.forEach(function (item) {
-
-            item.attributes[state.resolved.tzn] = zone;
-
-            if (zone === 0 && state.resolved.pdv) {
-              item.attributes[state.resolved.pdv] = 0;
-            }
-          });
-
-          updateSelectionInfo();
-
-          setStatus(
-            ui.cellEditStatus,
-            "TZN を " + zone + " に設定しました。\n更新セル数: " + updates.length
-          );
-
-          state.rxLayer.refresh();
-
-          // 圃場単位の集計も更新
+        // 編集後に PDV セクションの集計を更新する
+        featureLayer.on("edits", function () {
           if (state.currentField) {
             loadPdvForField(state.currentField);
           }
-
-        } catch (error) {
-          console.error(error);
-          setTznButtonsEnabled(true);
-          setStatus(ui.cellEditStatus, "保存に失敗しました: " + errorText(error), true);
-        }
-      }
-
-      function startCellEdit() {
-
-        if (!state.rxLayer) {
-          return;
-        }
-
-        state.cellEditMode = true;
-
-        ui.cellEditToggle.textContent = "TZN 編集モードを終了";
-        ui.cellEditToggle.className = "secondary";
+        });
 
         setStatus(
           ui.cellStatus,
-          "TZN 編集モード中です。\n" +
-          "地図右下のパネルで選択モードを切り替えます。"
+          "地図右上の編集ボタンから編集できます。\n" +
+          "セルを選択して TZN を 0～5 で変更します。"
         );
-
-        ui.cellEditorPanel.style.display = "";
-
-        // 編集中はポップアップを抑止する
-        if (view.popup) {
-          view.popup.autoOpenEnabled = false;
-          view.popup.close();
-        }
-
-        state.handles.push(view.on("click", onMapClickForTznEdit));
-        state.handles.push(view.on("drag", onMapDragForTznEdit));
-
-        // ArcGIS 標準の Shift ドラッグによるズームを抑止する
-        state.handles.push(
-          view.on("drag", ["Shift"], function (event) {
-            event.stopPropagation();
-          })
-        );
-
-        // ダブルクリックによるズームを抑止する
-        state.handles.push(
-          view.on("double-click", function (event) {
-            event.stopPropagation();
-          })
-        );
-
-        setSelectMode("single");
-
-        updateSelectionInfo();
       }
 
-      function stopCellEdit() {
+      function removeEditor() {
 
-        state.cellEditMode = false;
-        state.dragOrigin = null;
-
-        state.handles.forEach(function (handle) {
-          handle.remove();
-        });
-
-        state.handles = [];
-
-        drawRubberBand(null);
-
-        ui.cellEditToggle.textContent = "TZN 編集モードを開始";
-        ui.cellEditToggle.className = "";
-
-        ui.cellEditorPanel.style.display = "none";
-
-        setStatus(ui.cellStatus, "TZN 編集モードは停止中です。");
-
-        if (view.popup) {
-          view.popup.autoOpenEnabled = true;
+        if (state.editorExpand) {
+          view.ui.remove(state.editorExpand);
+          state.editorExpand.destroy();
+          state.editorExpand = null;
         }
 
-        // 地図操作とカーソルを元へ戻す
-        if (view.navigation) {
-
-          view.navigation.browserTouchPanEnabled = true;
-          view.navigation.momentumEnabled = true;
-
-          if (view.navigation.actionMap) {
-            view.navigation.actionMap.dragPrimary = "pan";
-            view.navigation.actionMap.dragSecondary = "rotate";
-          }
+        if (state.editor) {
+          state.editor.destroy();
+          state.editor = null;
         }
 
-        if (view.container) {
-          view.container.style.cursor = "";
-        }
-
-        state.selectMode = "single";
-
-        clearSelection();
+        setStatus(ui.cellStatus, "レイヤーを選択すると利用できます。");
       }
-
-      ui.selectionClearBtn.onclick = function () {
-        clearSelection();
-        setStatus(ui.cellEditStatus, "選択を解除しました。");
-      };
-
-      ui.cellCloseBtn.onclick = stopCellEdit;
-
-      ui.cellEditToggle.onclick = function () {
-        if (state.cellEditMode) {
-          stopCellEdit();
-        } else {
-          startCellEdit();
-        }
-      };
 
       // ==========================================================
       // 6. 圃場単位の PDV 編集
