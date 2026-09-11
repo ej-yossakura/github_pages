@@ -1,98 +1,1103 @@
 <!doctype html>
 <html lang="ja">
+
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ISOXML 処方マップビューア V3</title>
-<link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://js.arcgis.com/4.34/"></script>
-<style>
-html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif;color:#1f2937}#app{display:grid;grid-template-columns:365px 1fr}#panel{padding:16px;overflow:auto;border-right:1px solid #ccc;background:#fff}#viewDiv{height:100%}h1{font-size:19px;margin:0 0 8px}h2{font-size:15px;margin:18px 0 8px}.small{font-size:12px;color:#5f6b7a}.drop{border:2px dashed #718096;border-radius:8px;padding:14px;text-align:center;background:#f8fafc}input,select,button{box-sizing:border-box;width:100%;margin-top:8px;padding:8px;font-size:13px}button{border:0;border-radius:4px;background:#007ac2;color:#fff;cursor:pointer}button:disabled{background:#9ca3af}#signoutBtn{background:#6b7280}#userInfo{margin-top:8px;background:#f3f4f6;padding:8px;border-radius:4px;line-height:1.5}#status{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:4px;min-height:40px}.field-item{display:flex;gap:7px;align-items:center;margin:5px 0}.field-item input{width:auto;margin:0}.legend-row{display:grid;grid-template-columns:24px 28px 1fr;gap:7px;align-items:start;margin:6px 0;font-size:12px}.swatch{width:21px;height:14px;border:1px solid #555;margin-top:2px}@media(max-width:760px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr}#panel{max-height:48vh;border-right:0;border-bottom:1px solid #ccc}}
-</style>
-</head><body><div id="app"><aside id="panel">
-<h1>ISOXML 処方マップビューア V3</h1>
-<p class="small">TASKDATA.XML と GRD*.bin をブラウザー内で解析します。</p>
-<h2>ArcGIS Online</h2>
-<button id="signinBtn">ArcGIS Online にサインイン</button>
-<button id="signoutBtn" style="display:none;">サインアウト</button>
-<div id="userInfo" class="small">未ログイン</div>
-<h2>ベースマップ</h2>
-<select id="basemap"><option value="topo-vector">地形図</option><option value="streets-vector">道路</option><option value="hybrid">衛星画像（ハイブリッド）</option></select>
-<div class="drop"><strong>ISOXMLファイルを選択</strong><br><span class="small">XMLとBINをまとめて選択、またはZIP</span><input id="files" type="file" multiple accept=".xml,.bin,.txt,.zip"></div>
-<button id="load">読み込んで表示</button><button id="clear">表示をクリア</button>
-<h2>状態</h2><div id="status">ファイルを選択してください。</div>
-<h2>圃場選択・ズーム</h2><select id="fieldSelect" disabled><option value="">圃場を選択してください</option></select><button id="zoom" disabled>選択圃場へズーム</button><div id="fields" class="small">未読込</div>
-<h2>TZN凡例</h2><div id="legend"></div>
-</aside><main id="viewDiv"></main></div>
-<script>
-require(["esri/Map","esri/views/MapView","esri/layers/GraphicsLayer","esri/Graphic","esri/geometry/Polygon","esri/identity/OAuthInfo","esri/identity/IdentityManager","esri/portal/Portal"],function(ArcGISMap,MapView,GraphicsLayer,Graphic,Polygon,OAuthInfo,esriId,Portal){
-const colors={0:[180,180,180,.22],1:[49,130,189,.72],2:[107,174,214,.72],3:[116,196,118,.72],4:[254,178,76,.76],5:[222,45,38,.76]};
-const layer=new GraphicsLayer({title:"ISOXML Grid"});const map=new ArcGISMap({basemap:"topo-vector",layers:[layer]});const view=new MapView({container:"viewDiv",map:map,center:[142.06,43.75],zoom:11});
-const filesEl=document.getElementById("files"),statusEl=document.getElementById("status"),fieldSelect=document.getElementById("fieldSelect"),zoomBtn=document.getElementById("zoom"),fieldsEl=document.getElementById("fields"),legendEl=document.getElementById("legend");
-const signinBtn=document.getElementById("signinBtn"),signoutBtn=document.getElementById("signoutBtn"),userInfoEl=document.getElementById("userInfo");
-const taskInfo=new globalThis.Map();document.getElementById("basemap").onchange=e=>map.basemap=e.target.value;
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ISOXML 処方マップビューア V3</title>
 
-// ===== ArcGIS Online OAuth =====
-const PORTAL_URL="https://www.arcgis.com";
-const oauthInfo=new OAuthInfo({appId:"SPru10PuBbIOLtEF",portalUrl:PORTAL_URL,popup:false});
-esriId.registerOAuthInfos([oauthInfo]);
+  <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://js.arcgis.com/4.34/"></script>
 
-function showSignedIn(portal){
-  const u=portal.user||{};
-  userInfoEl.innerHTML='<b>ログイン中</b><br>'+(u.fullName||"")+'<br>'+(u.username||"")+'<br>'+(portal.name||"");
-  signinBtn.style.display="none";
-  signoutBtn.style.display="";
-}
-function showSignedOut(){
-  userInfoEl.textContent="未ログイン";
-  signinBtn.style.display="";
-  signoutBtn.style.display="none";
-}
-async function loadPortal(){
-  const portal=new Portal({url:PORTAL_URL,authMode:"immediate"});
-  await portal.load();
-  showSignedIn(portal);
-}
-async function checkStatus(){
-  try{
-    await esriId.checkSignInStatus(PORTAL_URL+"/sharing");
-    await loadPortal();
-  }catch(e){
-    showSignedOut();
-  }
-}
-async function signIn(){
-  try{
-    await esriId.getCredential(PORTAL_URL+"/sharing");
-    await loadPortal();
-  }catch(e){
-    console.error(e);
-    userInfoEl.textContent="サインインに失敗しました: "+(e.message||e);
-  }
-}
-function signOut(){
-  esriId.destroyCredentials();
-  showSignedOut();
-  location.reload();
-}
-signinBtn.onclick=signIn;
-signoutBtn.onclick=signOut;
-checkStatus();
-// ===== /ArcGIS Online OAuth =====
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      color: #1f2937;
+    }
 
-const baseName=p=>p.replaceAll("\\","/").split("/").pop().toUpperCase();
-async function collectFiles(files){const fm=new globalThis.Map();for(const file of files){if(file.name.toLowerCase().endsWith(".zip")){const zip=await JSZip.loadAsync(file);for(const [path,item] of Object.entries(zip.files)){if(!item.dir&&/\.(xml|bin|txt)$/i.test(path))fm.set(baseName(path),await item.async("arraybuffer"));}}else if(/\.(xml|bin|txt)$/i.test(file.name))fm.set(baseName(file.name),await file.arrayBuffer());}return fm;}
-function findFile(fm,wanted){const key=wanted.toUpperCase();if(fm.has(key))return fm.get(key);return fm.get(key.replace(/\.(XML|BIN)$/,".TXT"));}
-function parseXml(buf){const text=new TextDecoder("utf-8").decode(buf).replace(/^\uFEFF/,"");const doc=new DOMParser().parseFromString(text,"application/xml");if(doc.querySelector("parsererror"))throw new Error("TASKDATA.XMLを解析できません。");return doc;}
-function taskName(task,doc){const id=task.getAttribute("E"),pfd=[...doc.querySelectorAll("PFD")].find(x=>x.getAttribute("A")===id);return task.getAttribute("B")||pfd?.getAttribute("C")||id||task.getAttribute("A")||"圃場";}
-function vpnMap(doc){const r={};doc.querySelectorAll("ISO11783_TaskData > VPN").forEach(v=>r[v.getAttribute("A")]={offset:Number(v.getAttribute("B")||0),scale:Number(v.getAttribute("C")||1),decimals:Number(v.getAttribute("D")||0),unit:v.getAttribute("E")||""});return r;}
-function pdvInfo(task){const values={},vpnIds={};task.querySelectorAll(":scope > TZN").forEach(t=>{const z=Number(t.getAttribute("A")),p=t.querySelector(":scope > PDV");values[z]=p?Number(p.getAttribute("B")):null;vpnIds[z]=p?p.getAttribute("E"):null;});return{values,vpnIds};}
-function fmt(v,d){return Number(v).toLocaleString("ja-JP",{minimumFractionDigits:d,maximumFractionDigits:d});}
-function renderLegend(info=null){legendEl.innerHTML="";for(let z=0;z<=5;z++){const row=document.createElement("div");row.className="legend-row";const sw=document.createElement("span");sw.className="swatch";const c=colors[z];sw.style.background=`rgba(${c.join(",")})`;const n=document.createElement("b");n.textContent=z;const d=document.createElement("span");if(!info)d.textContent=z===0?"散布なし":`ゾーン ${z}`;else{const raw=info.values[z];let text=z===0?`散布なし / 生データ: ${raw??"未設定"} mg/m²`:`生データ: ${raw??"未設定"} mg/m²`;const id=info.vpnIds[z],vpn=id?info.vpns[id]:null;if(vpn&&raw!==null&&Number.isFinite(raw)){const shown=(raw+vpn.offset)*vpn.scale;text+=` / ${fmt(shown,vpn.decimals)} ${vpn.unit}`;}d.textContent=text;}row.append(sw,n,d);legendEl.append(row);}}renderLegend();
-function symbol(z){return{type:"simple-fill",color:colors[z]||[80,80,80,.65],outline:{color:[30,30,30,.4],width:.35}};}
-async function zoomSelected(){const info=taskInfo.get(fieldSelect.value);if(!info)return;await view.goTo(info.graphics,{padding:60});renderLegend(info);statusEl.textContent=`選択圃場: ${info.name}\nセル: ${info.graphics.length}`;}
-fieldSelect.onchange=zoomSelected;zoomBtn.onclick=zoomSelected;
-async function render(){try{statusEl.textContent="読み込み中...";layer.removeAll();taskInfo.clear();fieldsEl.innerHTML="";fieldSelect.innerHTML='<option value="">圃場を選択してください</option>';fieldSelect.disabled=true;zoomBtn.disabled=true;renderLegend();const fm=await collectFiles(filesEl.files);const xb=findFile(fm,"TASKDATA.XML");if(!xb)throw new Error("TASKDATA.XML（またはTASKDATA.txt）が見つかりません。");const doc=parseXml(xb),vpns=vpnMap(doc),tasks=[...doc.querySelectorAll("TSK")].filter(t=>t.querySelector(":scope > GRD"));if(!tasks.length)throw new Error("GRDを持つTSKが見つかりません。");let total=0;for(const task of tasks){const grd=task.querySelector(":scope > GRD"),name=taskName(task,doc),pdv=pdvInfo(task);const south=+grd.getAttribute("A"),west=+grd.getAttribute("B"),dy=+grd.getAttribute("C"),dx=+grd.getAttribute("D"),cols=+grd.getAttribute("E"),rows=+grd.getAttribute("F"),gridName=grd.getAttribute("G"),type=+grd.getAttribute("I");if(type!==1)throw new Error(`${name}: GRD Type 1以外は未対応です。`);const bb=findFile(fm,`${gridName}.BIN`);if(!bb)throw new Error(`${gridName}.bin（または.txt）が見つかりません。`);const values=new Uint8Array(bb),expected=cols*rows;if(values.length!==expected)throw new Error(`${gridName}: セル数不一致。期待=${expected}, 実際=${values.length}`);const gs=[],taskId=task.getAttribute("A");for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const i=r*cols+c,z=values[i],x0=west+c*dx,y0=south+r*dy,x1=x0+dx,y1=y0+dy;const geometry=new Polygon({spatialReference:{wkid:4326},rings:[[[x0,y0],[x1,y0],[x1,y1],[x0,y1],[x0,y0]]]});const g=new Graphic({geometry,symbol:symbol(z),attributes:{field:name,task:taskId,grid:gridName,row:r+1,column:c+1,tzn:z,pdv:pdv.values[z]??null},popupTemplate:{title:`${name} | TZN ${z}`,content:[{type:"fields",fieldInfos:[{fieldName:"grid",label:"GRD"},{fieldName:"row",label:"行"},{fieldName:"column",label:"列"},{fieldName:"tzn",label:"TZN"},{fieldName:"pdv",label:"PDV (mg/m²)"}]}]}});layer.add(g);gs.push(g);}taskInfo.set(taskId,{name,graphics:gs,values:pdv.values,vpnIds:pdv.vpnIds,vpns});const opt=document.createElement("option");opt.value=taskId;opt.textContent=`${name} (${cols} × ${rows})`;fieldSelect.append(opt);const label=document.createElement("label");label.className="field-item";const check=document.createElement("input");check.type="checkbox";check.checked=true;check.onchange=()=>gs.forEach(g=>g.visible=check.checked);label.append(check,document.createTextNode(opt.textContent));fieldsEl.append(label);total+=expected;}fieldSelect.disabled=false;zoomBtn.disabled=false;await view.goTo(layer.graphics.toArray(),{padding:40});statusEl.textContent=`読込完了\n圃場: ${tasks.length}\nセル: ${total}`;}catch(e){console.error(e);statusEl.textContent=`エラー: ${e.message}`;}}
-document.getElementById("load").onclick=render;document.getElementById("clear").onclick=()=>{layer.removeAll();taskInfo.clear();fieldSelect.innerHTML='<option value="">圃場を選択してください</option>';fieldSelect.disabled=true;zoomBtn.disabled=true;fieldsEl.textContent="未読込";renderLegend();statusEl.textContent="表示をクリアしました。";};
-});
-</script></body></html>
+    #app {
+      display: grid;
+      grid-template-columns: 365px 1fr;
+    }
+
+    #panel {
+      padding: 16px;
+      overflow: auto;
+      border-right: 1px solid #ccc;
+      background: #fff;
+    }
+
+    #viewDiv {
+      height: 100%;
+    }
+
+    h1 {
+      font-size: 19px;
+      margin: 0 0 8px;
+    }
+
+    h2 {
+      font-size: 15px;
+      margin: 18px 0 8px;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #5f6b7a;
+    }
+
+    .drop {
+      border: 2px dashed #718096;
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+      background: #f8fafc;
+    }
+
+    input,
+    select,
+    button {
+      box-sizing: border-box;
+      width: 100%;
+      margin-top: 8px;
+      padding: 8px;
+      font-size: 13px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 4px;
+      background: #007ac2;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #9ca3af;
+    }
+
+    #signoutBtn {
+      background: #6b7280;
+    }
+
+    #userInfo {
+      margin-top: 8px;
+      background: #f3f4f6;
+      padding: 8px;
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+
+    #status {
+      white-space: pre-wrap;
+      background: #f3f4f6;
+      padding: 10px;
+      border-radius: 4px;
+      min-height: 40px;
+    }
+
+    .field-item {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      margin: 5px 0;
+    }
+
+    .field-item input {
+      width: auto;
+      margin: 0;
+    }
+
+    .legend-row {
+      display: grid;
+      grid-template-columns: 24px 28px 1fr;
+      gap: 7px;
+      align-items: start;
+      margin: 6px 0;
+      font-size: 12px;
+    }
+
+    .swatch {
+      width: 21px;
+      height: 14px;
+      border: 1px solid #555;
+      margin-top: 2px;
+    }
+
+    @media (max-width: 760px) {
+      #app {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+
+      #panel {
+        max-height: 48vh;
+        border-right: 0;
+        border-bottom: 1px solid #ccc;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <aside id="panel">
+
+      <h1>ISOXML 処方マップビューア V3</h1>
+      <p class="small">TASKDATA.XML と GRD*.bin をブラウザー内で解析します。</p>
+
+      <h2>ArcGIS Online</h2>
+      <button id="signinBtn">ArcGIS Online にサインイン</button>
+      <button id="signoutBtn" style="display:none;">サインアウト</button>
+      <div id="userInfo" class="small">未ログイン</div>
+
+      <div id="addDataPanel" style="display:none;">
+        <h2>データの追加</h2>
+        <input id="itemSearch" type="text" placeholder="アイテム名で絞り込み（空欄で自分のアイテム）">
+        <button id="itemSearchBtn">アイテムを検索</button>
+        <select id="itemSelect" size="6" disabled>
+          <option value="">検索するとここに表示されます</option>
+        </select>
+        <button id="addLayerBtn" disabled>選択アイテムをマップに追加</button>
+        <div id="addDataStatus" class="small">未検索</div>
+      </div>
+
+      <h2>ベースマップ</h2>
+      <select id="basemap">
+        <option value="topo-vector">地形図</option>
+        <option value="streets-vector">道路</option>
+        <option value="hybrid">衛星画像（ハイブリッド）</option>
+      </select>
+
+      <div class="drop">
+        <strong>ISOXMLファイルを選択</strong><br>
+        <span class="small">XMLとBINをまとめて選択、またはZIP</span>
+        <input id="files" type="file" multiple accept=".xml,.bin,.txt,.zip">
+      </div>
+
+      <button id="load">読み込んで表示</button>
+      <button id="clear">表示をクリア</button>
+
+      <h2>状態</h2>
+      <div id="status">ファイルを選択してください。</div>
+
+      <h2>圃場選択・ズーム</h2>
+      <select id="fieldSelect" disabled>
+        <option value="">圃場を選択してください</option>
+      </select>
+      <button id="zoom" disabled>選択圃場へズーム</button>
+      <div id="fields" class="small">未読込</div>
+
+      <h2>TZN凡例</h2>
+      <div id="legend"></div>
+
+    </aside>
+    <main id="viewDiv"></main>
+  </div>
+
+  <script>
+    require([
+      "esri/Map",
+      "esri/views/MapView",
+      "esri/layers/GraphicsLayer",
+      "esri/Graphic",
+      "esri/geometry/Polygon",
+      "esri/identity/OAuthInfo",
+      "esri/identity/IdentityManager",
+      "esri/portal/Portal",
+      "esri/portal/PortalQueryParams",
+      "esri/layers/Layer",
+      "esri/widgets/LayerList",
+      "esri/widgets/Legend",
+      "esri/widgets/Expand"
+    ], function (
+      ArcGISMap,
+      MapView,
+      GraphicsLayer,
+      Graphic,
+      Polygon,
+      OAuthInfo,
+      esriId,
+      Portal,
+      PortalQueryParams,
+      Layer,
+      LayerList,
+      Legend,
+      Expand
+    ) {
+
+      // ================================================
+      // TZN 表示色
+      // ================================================
+
+      const colors = {
+        0: [180, 180, 180, .22],
+        1: [49, 130, 189, .72],
+        2: [107, 174, 214, .72],
+        3: [116, 196, 118, .72],
+        4: [254, 178, 76, .76],
+        5: [222, 45, 38, .76]
+      };
+
+      // ================================================
+      // マップ初期化
+      // ================================================
+
+      const layer = new GraphicsLayer({
+        title: "ISOXML Grid"
+      });
+
+      const map = new ArcGISMap({
+        basemap: "topo-vector",
+        layers: [layer]
+      });
+
+      const view = new MapView({
+        container: "viewDiv",
+        map: map,
+        center: [142.06, 43.75],
+        zoom: 11
+      });
+
+      // ================================================
+      // DOM要素
+      // ================================================
+
+      const filesEl = document.getElementById("files");
+      const statusEl = document.getElementById("status");
+      const fieldSelect = document.getElementById("fieldSelect");
+      const zoomBtn = document.getElementById("zoom");
+      const fieldsEl = document.getElementById("fields");
+      const legendEl = document.getElementById("legend");
+
+      const signinBtn = document.getElementById("signinBtn");
+      const signoutBtn = document.getElementById("signoutBtn");
+      const userInfoEl = document.getElementById("userInfo");
+
+      const addDataPanel = document.getElementById("addDataPanel");
+      const itemSearchEl = document.getElementById("itemSearch");
+      const itemSearchBtn = document.getElementById("itemSearchBtn");
+      const itemSelect = document.getElementById("itemSelect");
+      const addLayerBtn = document.getElementById("addLayerBtn");
+      const addDataStatus = document.getElementById("addDataStatus");
+
+      // ログイン中のポータルと検索結果を保持
+      let currentPortal = null;
+      const foundItems = new globalThis.Map();
+
+      // 圃場ごとの情報を保持
+      const taskInfo = new globalThis.Map();
+
+      // ベースマップ切替
+      document.getElementById("basemap").onchange = function (e) {
+        map.basemap = e.target.value;
+      };
+
+      // ================================================
+      // ArcGIS Online 認証
+      // ================================================
+
+      const PORTAL_URL = "https://www.arcgis.com";
+
+      const oauthInfo = new OAuthInfo({
+        appId: "SPru10PuBbIOLtEF",
+        portalUrl: PORTAL_URL,
+        popup: false
+      });
+
+      esriId.registerOAuthInfos([oauthInfo]);
+
+
+      // ログイン中の表示
+      function showSignedIn(portal) {
+
+        const user = portal.user || {};
+
+        userInfoEl.innerHTML =
+          "<b>ログイン中</b><br>" +
+          (user.fullName || "") + "<br>" +
+          (user.username || "") + "<br>" +
+          (portal.name || "");
+
+        signinBtn.style.display = "none";
+        signoutBtn.style.display = "";
+
+        // ログイン後にデータ追加パネルを表示
+        currentPortal = portal;
+        addDataPanel.style.display = "";
+      }
+
+
+      // 未ログインの表示
+      function showSignedOut() {
+
+        userInfoEl.textContent = "未ログイン";
+
+        signinBtn.style.display = "";
+        signoutBtn.style.display = "none";
+
+        // 未ログイン時はデータ追加パネルを隠す
+        currentPortal = null;
+        addDataPanel.style.display = "none";
+
+        foundItems.clear();
+
+        itemSelect.innerHTML =
+          '<option value="">検索するとここに表示されます</option>';
+
+        itemSelect.disabled = true;
+        addLayerBtn.disabled = true;
+        addDataStatus.textContent = "未検索";
+      }
+
+
+      // ポータル情報を取得
+      async function loadPortal() {
+
+        const portal = new Portal({
+          url: PORTAL_URL,
+          authMode: "immediate"
+        });
+
+        await portal.load();
+
+        showSignedIn(portal);
+      }
+
+
+      // 起動時のログイン状態確認
+      async function checkStatus() {
+
+        try {
+
+          await esriId.checkSignInStatus(
+            PORTAL_URL + "/sharing"
+          );
+
+          await loadPortal();
+
+        } catch (error) {
+
+          showSignedOut();
+        }
+      }
+
+
+      // サインイン
+      async function signIn() {
+
+        try {
+
+          await esriId.getCredential(
+            PORTAL_URL + "/sharing"
+          );
+
+          await loadPortal();
+
+        } catch (error) {
+
+          console.error(error);
+
+          userInfoEl.textContent =
+            "サインインに失敗しました: " +
+            (error.message || error);
+        }
+      }
+
+
+      // サインアウト
+      function signOut() {
+
+        esriId.destroyCredentials();
+
+        showSignedOut();
+
+        location.reload();
+      }
+
+
+      signinBtn.onclick = signIn;
+      signoutBtn.onclick = signOut;
+
+      checkStatus();
+
+      // ================================================
+      // データの追加
+      //
+      // ArcGIS Online のアイテムを検索し、
+      // Layer.fromPortalItem() でマップへ追加する
+      // ================================================
+
+      async function searchItems() {
+
+        if (!currentPortal) {
+          addDataStatus.textContent =
+            "先に ArcGIS Online へサインインしてください。";
+          return;
+        }
+
+        try {
+
+          addDataStatus.textContent = "検索中...";
+
+          foundItems.clear();
+
+          itemSelect.innerHTML = "";
+          itemSelect.disabled = true;
+          addLayerBtn.disabled = true;
+
+          const keyword = itemSearchEl.value.trim();
+
+          // 対象はマップに追加できるレイヤー系アイテム
+          const typeFilter =
+            '(type:"Feature Service"' +
+            ' OR type:"Map Service"' +
+            ' OR type:"Image Service"' +
+            ' OR type:"Vector Tile Service"' +
+            ' OR type:"Scene Service")';
+
+          // 既定は自分が所有するアイテム
+          const ownerFilter =
+            'owner:' + currentPortal.user.username;
+
+          let query = ownerFilter + " AND " + typeFilter;
+
+          if (keyword) {
+            query = query + ' AND (title:"' + keyword + '")';
+          }
+
+          const params = new PortalQueryParams({
+            query: query,
+            sortField: "modified",
+            sortOrder: "desc",
+            num: 50
+          });
+
+          const result = await currentPortal.queryItems(params);
+
+          if (!result.results.length) {
+
+            itemSelect.innerHTML =
+              '<option value="">該当アイテムがありません</option>';
+
+            addDataStatus.textContent =
+              "該当なし。キーワードを変えて再検索してください。";
+
+            return;
+          }
+
+          result.results.forEach(function (item) {
+
+            foundItems.set(item.id, item);
+
+            const option = document.createElement("option");
+            option.value = item.id;
+            option.textContent = item.title + "（" + item.type + "）";
+
+            itemSelect.append(option);
+          });
+
+          itemSelect.disabled = false;
+
+          addDataStatus.textContent =
+            result.results.length + " 件見つかりました。";
+
+        } catch (error) {
+
+          console.error(error);
+
+          addDataStatus.textContent =
+            "検索に失敗しました: " + (error.message || error);
+        }
+      }
+
+
+      async function addSelectedLayer() {
+
+        const item = foundItems.get(itemSelect.value);
+
+        if (!item) {
+          return;
+        }
+
+        try {
+
+          addDataStatus.textContent =
+            "追加中: " + item.title;
+
+          const newLayer = await Layer.fromPortalItem({
+            portalItem: item
+          });
+
+          await newLayer.load();
+
+          map.add(newLayer);
+
+          if (newLayer.fullExtent) {
+            await view.goTo(newLayer.fullExtent);
+          }
+
+          addDataStatus.textContent =
+            "追加しました: " + item.title;
+
+        } catch (error) {
+
+          console.error(error);
+
+          addDataStatus.textContent =
+            "追加に失敗しました: " + (error.message || error);
+        }
+      }
+
+
+      itemSearchBtn.onclick = searchItems;
+
+      itemSelect.onchange = function () {
+        addLayerBtn.disabled = !itemSelect.value;
+      };
+
+      addLayerBtn.onclick = addSelectedLayer;
+
+      // ================================================
+      // レイヤーリストと凡例
+      // ================================================
+
+      const layerList = new LayerList({
+        view: view,
+        listItemCreatedFunction: function (event) {
+
+          const listItem = event.item;
+
+          // ISOXMLグリッド以外のレイヤーへ凡例を付与
+          if (listItem.layer !== layer) {
+
+            listItem.panel = {
+              content: "legend",
+              open: false
+            };
+          }
+
+          // 不透明度スライダーと削除操作
+          listItem.actionsSections = [[
+            {
+              title: "レイヤーを削除",
+              className: "esri-icon-trash",
+              id: "remove-layer"
+            }
+          ]];
+        }
+      });
+
+      layerList.on("trigger-action", function (event) {
+
+        if (event.action.id === "remove-layer") {
+          map.remove(event.item.layer);
+        }
+      });
+
+      view.ui.add(
+        new Expand({
+          view: view,
+          content: layerList,
+          expandTooltip: "レイヤー"
+        }),
+        "top-right"
+      );
+
+      view.ui.add(
+        new Expand({
+          view: view,
+          content: new Legend({ view: view }),
+          expandTooltip: "凡例"
+        }),
+        "top-right"
+      );
+
+      // ================================================
+      // ファイル読込
+      // ================================================
+
+      const baseName = function (path) {
+        return path
+          .replaceAll("\\", "/")
+          .split("/")
+          .pop()
+          .toUpperCase();
+      };
+
+
+      async function collectFiles(files) {
+
+        const fileMap = new globalThis.Map();
+
+        for (const file of files) {
+
+          if (file.name.toLowerCase().endsWith(".zip")) {
+
+            const zip = await JSZip.loadAsync(file);
+
+            for (const [path, item] of Object.entries(zip.files)) {
+
+              if (!item.dir && /\.(xml|bin|txt)$/i.test(path)) {
+
+                fileMap.set(
+                  baseName(path),
+                  await item.async("arraybuffer")
+                );
+              }
+            }
+
+          } else if (/\.(xml|bin|txt)$/i.test(file.name)) {
+
+            fileMap.set(
+              baseName(file.name),
+              await file.arrayBuffer()
+            );
+          }
+        }
+
+        return fileMap;
+      }
+
+
+      function findFile(fileMap, wanted) {
+
+        const key = wanted.toUpperCase();
+
+        if (fileMap.has(key)) {
+          return fileMap.get(key);
+        }
+
+        // 拡張子をtxtへ変更した検証データにも対応
+        return fileMap.get(
+          key.replace(/\.(XML|BIN)$/, ".TXT")
+        );
+      }
+
+      // ================================================
+      // ISOXML解析
+      // ================================================
+
+      function parseXml(buffer) {
+
+        const text = new TextDecoder("utf-8")
+          .decode(buffer)
+          .replace(/^\uFEFF/, "");
+
+        const doc = new DOMParser()
+          .parseFromString(text, "application/xml");
+
+        if (doc.querySelector("parsererror")) {
+          throw new Error("TASKDATA.XMLを解析できません。");
+        }
+
+        return doc;
+      }
+
+
+      function taskName(task, doc) {
+
+        const pfdId = task.getAttribute("E");
+
+        const pfd = [...doc.querySelectorAll("PFD")]
+          .find(x => x.getAttribute("A") === pfdId);
+
+        return task.getAttribute("B")
+          || pfd?.getAttribute("C")
+          || pfdId
+          || task.getAttribute("A")
+          || "圃場";
+      }
+
+
+      // ValuePresentation
+      function vpnMap(doc) {
+
+        const result = {};
+
+        doc.querySelectorAll("ISO11783_TaskData > VPN")
+          .forEach(function (vpn) {
+
+            result[vpn.getAttribute("A")] = {
+              offset: Number(vpn.getAttribute("B") || 0),
+              scale: Number(vpn.getAttribute("C") || 1),
+              decimals: Number(vpn.getAttribute("D") || 0),
+              unit: vpn.getAttribute("E") || ""
+            };
+          });
+
+        return result;
+      }
+
+
+      // TZNごとのPDV
+      function pdvInfo(task) {
+
+        const values = {};
+        const vpnIds = {};
+
+        task.querySelectorAll(":scope > TZN")
+          .forEach(function (tzn) {
+
+            const zone = Number(tzn.getAttribute("A"));
+            const pdv = tzn.querySelector(":scope > PDV");
+
+            values[zone] = pdv
+              ? Number(pdv.getAttribute("B"))
+              : null;
+
+            vpnIds[zone] = pdv
+              ? pdv.getAttribute("E")
+              : null;
+          });
+
+        return { values, vpnIds };
+      }
+
+      // ================================================
+      // 凡例
+      // ================================================
+
+      function fmt(value, decimals) {
+
+        return Number(value).toLocaleString("ja-JP", {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals
+        });
+      }
+
+
+      function renderLegend(info = null) {
+
+        legendEl.innerHTML = "";
+
+        for (let zone = 0; zone <= 5; zone++) {
+
+          const row = document.createElement("div");
+          row.className = "legend-row";
+
+          const swatch = document.createElement("span");
+          swatch.className = "swatch";
+
+          const color = colors[zone];
+          swatch.style.background = `rgba(${color.join(",")})`;
+
+          const number = document.createElement("b");
+          number.textContent = zone;
+
+          const detail = document.createElement("span");
+
+          if (!info) {
+
+            detail.textContent = zone === 0
+              ? "散布なし"
+              : `ゾーン ${zone}`;
+
+          } else {
+
+            const raw = info.values[zone];
+
+            let text = zone === 0
+              ? `散布なし / 生データ: ${raw ?? "未設定"} mg/m²`
+              : `生データ: ${raw ?? "未設定"} mg/m²`;
+
+            const vpnId = info.vpnIds[zone];
+            const vpn = vpnId ? info.vpns[vpnId] : null;
+
+            // 表示値 = (生データ + offset) × scale
+            if (vpn && raw !== null && Number.isFinite(raw)) {
+
+              const shown = (raw + vpn.offset) * vpn.scale;
+
+              text += ` / ${fmt(shown, vpn.decimals)} ${vpn.unit}`;
+            }
+
+            detail.textContent = text;
+          }
+
+          row.append(swatch, number, detail);
+          legendEl.append(row);
+        }
+      }
+
+      renderLegend();
+
+
+      function symbol(zone) {
+
+        return {
+          type: "simple-fill",
+          color: colors[zone] || [80, 80, 80, .65],
+          outline: {
+            color: [30, 30, 30, .4],
+            width: .35
+          }
+        };
+      }
+
+      // ================================================
+      // 圃場選択・ズーム
+      // ================================================
+
+      async function zoomSelected() {
+
+        const info = taskInfo.get(fieldSelect.value);
+
+        if (!info) {
+          return;
+        }
+
+        await view.goTo(info.graphics, { padding: 60 });
+
+        renderLegend(info);
+
+        statusEl.textContent =
+          `選択圃場: ${info.name}\nセル: ${info.graphics.length}`;
+      }
+
+      fieldSelect.onchange = zoomSelected;
+      zoomBtn.onclick = zoomSelected;
+
+      // ================================================
+      // 描画処理
+      // ================================================
+
+      async function render() {
+
+        try {
+
+          statusEl.textContent = "読み込み中...";
+
+          layer.removeAll();
+          taskInfo.clear();
+          fieldsEl.innerHTML = "";
+
+          fieldSelect.innerHTML =
+            '<option value="">圃場を選択してください</option>';
+
+          fieldSelect.disabled = true;
+          zoomBtn.disabled = true;
+
+          renderLegend();
+
+
+          const fileMap = await collectFiles(filesEl.files);
+
+          const xmlBuffer = findFile(fileMap, "TASKDATA.XML");
+
+          if (!xmlBuffer) {
+            throw new Error(
+              "TASKDATA.XML（またはTASKDATA.txt）が見つかりません。"
+            );
+          }
+
+          const doc = parseXml(xmlBuffer);
+          const vpns = vpnMap(doc);
+
+          const tasks = [...doc.querySelectorAll("TSK")]
+            .filter(t => t.querySelector(":scope > GRD"));
+
+          if (!tasks.length) {
+            throw new Error("GRDを持つTSKが見つかりません。");
+          }
+
+
+          let total = 0;
+
+          for (const task of tasks) {
+
+            const grd = task.querySelector(":scope > GRD");
+            const name = taskName(task, doc);
+            const pdv = pdvInfo(task);
+
+            // GRD属性
+            const south = +grd.getAttribute("A");
+            const west = +grd.getAttribute("B");
+            const dy = +grd.getAttribute("C");
+            const dx = +grd.getAttribute("D");
+            const cols = +grd.getAttribute("E");
+            const rows = +grd.getAttribute("F");
+            const gridName = grd.getAttribute("G");
+            const type = +grd.getAttribute("I");
+
+            if (type !== 1) {
+              throw new Error(
+                `${name}: GRD Type 1以外は未対応です。`
+              );
+            }
+
+            const binBuffer = findFile(
+              fileMap,
+              `${gridName}.BIN`
+            );
+
+            if (!binBuffer) {
+              throw new Error(
+                `${gridName}.bin（または.txt）が見つかりません。`
+              );
+            }
+
+            const values = new Uint8Array(binBuffer);
+            const expected = cols * rows;
+
+            if (values.length !== expected) {
+              throw new Error(
+                `${gridName}: セル数不一致。` +
+                `期待=${expected}, 実際=${values.length}`
+              );
+            }
+
+
+            const graphics = [];
+            const taskId = task.getAttribute("A");
+
+            for (let r = 0; r < rows; r++) {
+
+              for (let c = 0; c < cols; c++) {
+
+                const index = r * cols + c;
+                const zone = values[index];
+
+                const x0 = west + c * dx;
+                const y0 = south + r * dy;
+                const x1 = x0 + dx;
+                const y1 = y0 + dy;
+
+                const geometry = new Polygon({
+                  spatialReference: { wkid: 4326 },
+                  rings: [[
+                    [x0, y0],
+                    [x1, y0],
+                    [x1, y1],
+                    [x0, y1],
+                    [x0, y0]
+                  ]]
+                });
+
+                const graphic = new Graphic({
+                  geometry: geometry,
+                  symbol: symbol(zone),
+                  attributes: {
+                    field: name,
+                    task: taskId,
+                    grid: gridName,
+                    row: r + 1,
+                    column: c + 1,
+                    tzn: zone,
+                    pdv: pdv.values[zone] ?? null
+                  },
+                  popupTemplate: {
+                    title: `${name} | TZN ${zone}`,
+                    content: [{
+                      type: "fields",
+                      fieldInfos: [
+                        { fieldName: "grid", label: "GRD" },
+                        { fieldName: "row", label: "行" },
+                        { fieldName: "column", label: "列" },
+                        { fieldName: "tzn", label: "TZN" },
+                        { fieldName: "pdv", label: "PDV (mg/m²)" }
+                      ]
+                    }]
+                  }
+                });
+
+                layer.add(graphic);
+                graphics.push(graphic);
+              }
+            }
+
+
+            taskInfo.set(taskId, {
+              name: name,
+              graphics: graphics,
+              values: pdv.values,
+              vpnIds: pdv.vpnIds,
+              vpns: vpns
+            });
+
+
+            // 圃場選択リスト
+            const option = document.createElement("option");
+            option.value = taskId;
+            option.textContent = `${name} (${cols} × ${rows})`;
+            fieldSelect.append(option);
+
+
+            // 表示切替チェックボックス
+            const label = document.createElement("label");
+            label.className = "field-item";
+
+            const check = document.createElement("input");
+            check.type = "checkbox";
+            check.checked = true;
+
+            check.onchange = function () {
+              graphics.forEach(function (g) {
+                g.visible = check.checked;
+              });
+            };
+
+            label.append(
+              check,
+              document.createTextNode(option.textContent)
+            );
+
+            fieldsEl.append(label);
+
+            total += expected;
+          }
+
+
+          fieldSelect.disabled = false;
+          zoomBtn.disabled = false;
+
+          await view.goTo(
+            layer.graphics.toArray(),
+            { padding: 40 }
+          );
+
+          statusEl.textContent =
+            `読込完了\n圃場: ${tasks.length}\nセル: ${total}`;
+
+        } catch (error) {
+
+          console.error(error);
+
+          statusEl.textContent = `エラー: ${error.message}`;
+        }
+      }
+
+      // ================================================
+      // ボタン接続
+      // ================================================
+
+      document.getElementById("load").onclick = render;
+
+      document.getElementById("clear").onclick = function () {
+
+        layer.removeAll();
+        taskInfo.clear();
+
+        fieldSelect.innerHTML =
+          '<option value="">圃場を選択してください</option>';
+
+        fieldSelect.disabled = true;
+        zoomBtn.disabled = true;
+
+        fieldsEl.textContent = "未読込";
+
+        renderLegend();
+
+        statusEl.textContent = "表示をクリアしました。";
+      };
+
+    });
+  </script>
+</body>
+
+</html>
