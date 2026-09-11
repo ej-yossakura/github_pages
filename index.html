@@ -197,6 +197,40 @@
       color: #9ca3af;
     }
 
+    /* 選択モード切替 */
+    .select-mode {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .select-mode button {
+      margin: 0;
+      padding: 7px 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #1f2937;
+      border: 1px solid #c3ccd6;
+    }
+
+    .select-mode button:hover:not(.active) {
+      background: #eef5fb;
+      border-color: #007ac2;
+    }
+
+    .select-mode button.active {
+      background: #007ac2;
+      color: #fff;
+      border-color: #007ac2;
+      font-weight: 600;
+    }
+
+    .select-mode button.active.remove {
+      background: #b45309;
+      border-color: #b45309;
+    }
+
     /* 統計タブ */
     .tabs {
       display: grid;
@@ -270,7 +304,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V8</h1>
+      <h1>ISOXML 施肥設計アプリ V8a</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -317,12 +351,19 @@
           地図右上の作図ツールで矩形、多角形、フリーハンドの範囲を描き、
           範囲内のセルを選択します。選択後、下のボタンで TZN を一括設定します。
         </p>
+
+        <h3>範囲を描いたときの動作</h3>
+        <div class="select-mode" id="selectModeButtons">
+          <button type="button" id="modeAddBtn" class="active">選択に追加</button>
+          <button type="button" id="modeRemoveBtn">選択から除外</button>
+        </div>
+
         <div id="selectionInfo" class="info-box">セルが選択されていません。</div>
 
         <h3>TZN を設定</h3>
         <div class="tzn-buttons" id="tznButtons"></div>
 
-        <button id="selectionClearBtn" class="secondary">選択を解除</button>
+        <button id="selectionClearBtn" class="secondary">すべての選択を解除</button>
         <div id="cellStatus" class="info-box">レイヤーを選択すると利用できます。</div>
       </section>
 
@@ -522,6 +563,8 @@
         fieldStatus: dom("fieldStatus"),
 
         cellSection: dom("cellSection"),
+        modeAddBtn: dom("modeAddBtn"),
+        modeRemoveBtn: dom("modeRemoveBtn"),
         selectionInfo: dom("selectionInfo"),
         tznButtons: dom("tznButtons"),
         selectionClearBtn: dom("selectionClearBtn"),
@@ -557,8 +600,11 @@
 
         // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
         selection: new globalThis.Map(),
+        // 範囲を描いたときの動作: "add" または "remove"
+        selectMode: "add",
         sketch: null,
         sketchExpand: null,
+        clickHandle: null,
 
         // 統計
         statsScope: "field"
@@ -1253,10 +1299,14 @@
 
         view.ui.add(state.sketchExpand, "top-right");
 
+        // セルをクリックして個別に選択、解除する
+        state.clickHandle = view.on("click", onMapClick);
+
         setStatus(
           ui.cellStatus,
           "地図右上の作図ツールから範囲を描いてください。\n" +
-          "矩形、多角形、フリーハンドに対応しています。"
+          "矩形、多角形、フリーハンドに対応しています。\n" +
+          "セルをクリックすると個別に選択、解除できます。"
         );
       }
 
@@ -1273,21 +1323,139 @@
           state.sketch = null;
         }
 
+        if (state.clickHandle) {
+          state.clickHandle.remove();
+          state.clickHandle = null;
+        }
+
         sketchLayer.removeAll();
+      }
+
+      // クリックしたセルの選択を切り替える
+      async function onMapClick(event) {
+
+        if (!state.rxLayer) {
+          return;
+        }
+
+        // 作図中はクリック選択を行わない
+        if (state.sketch && state.sketch.state === "active") {
+          return;
+        }
+
+        try {
+
+          const response = await view.hitTest(event, {
+            include: [state.rxLayer]
+          });
+
+          const hit = response.results.find(function (item) {
+            return item.graphic && item.graphic.layer === state.rxLayer;
+          });
+
+          if (!hit) {
+            return;
+          }
+
+          event.stopPropagation();
+
+          const objectId = hit.graphic.attributes[state.rxLayer.objectIdField];
+
+          // 選択済みなら解除する
+          if (state.selection.has(objectId)) {
+
+            state.selection.delete(objectId);
+
+            refreshSelectionGraphics();
+            updateSelectionInfo();
+
+            setStatus(ui.cellStatus, "1 件を選択から除外しました。");
+
+            return;
+          }
+
+          // 属性とジオメトリを取得して選択へ追加する
+          const query = state.rxLayer.createQuery();
+          query.objectIds = [objectId];
+          query.outFields = [
+            state.rxLayer.objectIdField,
+            state.resolved.fieldId,
+            state.resolved.tzn,
+            state.resolved.pdv
+          ];
+          query.returnGeometry = true;
+
+          const result = await state.rxLayer.queryFeatures(query);
+
+          if (!result.features.length) {
+            return;
+          }
+
+          addToSelection(result.features);
+
+          setStatus(ui.cellStatus, "1 件を選択に追加しました。");
+
+        } catch (error) {
+          console.error(error);
+          setStatus(ui.cellStatus, "取得に失敗しました: " + errorText(error), true);
+        }
       }
 
       // ----- 選択 -----
 
-      // 描画した範囲でセルを選択
+      // 描画した範囲でセルを選択、または選択から除外する
       async function selectByGeometry(geometry) {
 
         if (!state.rxLayer || !geometry) {
           return;
         }
 
+        const isRemove = state.selectMode === "remove";
+
         try {
 
           setStatus(ui.cellStatus, "範囲内のセルを取得中...");
+
+          // 除外モードでは選択済みのセルだけを対象にする
+          if (isRemove) {
+
+            if (!state.selection.size) {
+              setStatus(ui.cellStatus, "選択中のセルがありません。");
+              return;
+            }
+
+            const query = state.rxLayer.createQuery();
+            query.geometry = geometry;
+            query.spatialRelationship = "intersects";
+            query.outFields = [state.rxLayer.objectIdField];
+            query.returnGeometry = false;
+            query.num = CONFIG.queryLimit;
+
+            const result = await state.rxLayer.queryFeatures(query);
+
+            let removed = 0;
+
+            result.features.forEach(function (feature) {
+
+              const objectId = feature.attributes[state.rxLayer.objectIdField];
+
+              if (state.selection.delete(objectId)) {
+                removed += 1;
+              }
+            });
+
+            refreshSelectionGraphics();
+            updateSelectionInfo();
+
+            setStatus(
+              ui.cellStatus,
+              removed
+                ? removed + " 件を選択から除外しました。"
+                : "範囲内に選択中のセルがありません。"
+            );
+
+            return;
+          }
 
           const query = state.rxLayer.createQuery();
           query.geometry = geometry;
@@ -1325,6 +1493,32 @@
           setStatus(ui.cellStatus, "取得に失敗しました: " + errorText(error), true);
         }
       }
+
+      // 範囲を描いたときの動作を切り替える
+      function setSelectMode(mode) {
+
+        state.selectMode = mode;
+
+        const isRemove = mode === "remove";
+
+        ui.modeAddBtn.className = isRemove ? "" : "active";
+        ui.modeRemoveBtn.className = isRemove ? "active remove" : "";
+
+        setStatus(
+          ui.cellStatus,
+          isRemove
+            ? "除外モードです。範囲を描くと、その中の選択済みセルを解除します。"
+            : "追加モードです。範囲を描くと、その中のセルを選択します。"
+        );
+      }
+
+      ui.modeAddBtn.onclick = function () {
+        setSelectMode("add");
+      };
+
+      ui.modeRemoveBtn.onclick = function () {
+        setSelectMode("remove");
+      };
 
       // 選択へ追加
       function addToSelection(features) {
@@ -1404,6 +1598,22 @@
         state.selection.clear();
         selectionLayer.removeAll();
         updateSelectionInfo();
+
+        // 追加モードへ戻す
+        if (ui.modeAddBtn) {
+          setSelectModeSilent("add");
+        }
+      }
+
+      // 状態表示を変えずにモードだけ戻す
+      function setSelectModeSilent(mode) {
+
+        state.selectMode = mode;
+
+        const isRemove = mode === "remove";
+
+        ui.modeAddBtn.className = isRemove ? "" : "active";
+        ui.modeRemoveBtn.className = isRemove ? "active remove" : "";
       }
 
       // ----- TZN 適用 -----
@@ -1544,7 +1754,7 @@
 
       ui.selectionClearBtn.onclick = function () {
         clearSelection();
-        setStatus(ui.cellStatus, "選択を解除しました。");
+        setStatus(ui.cellStatus, "すべての選択を解除しました。");
       };
 
       // ==========================================================
