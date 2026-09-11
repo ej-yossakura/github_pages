@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ISOXML 施肥設計アプリ V9</title>
+  <title>ISOXML 施肥設計アプリ V10</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -172,6 +172,53 @@
       color: #5f6b7a;
     }
 
+    /* 選択ツール */
+    .draw-tools {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .draw-tools button {
+      margin: 0;
+      padding: 9px 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #1f2937;
+      border: 1px solid #c3ccd6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .draw-tools button:hover:not(:disabled) {
+      background: #eef5fb;
+      border-color: #007ac2;
+    }
+
+    .draw-tools button.active {
+      background: #007ac2;
+      color: #fff;
+      border-color: #007ac2;
+    }
+
+    .draw-tools button:disabled {
+      background: #f1f3f5;
+      color: #9ca3af;
+    }
+
+    .draw-tools svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
     /* TZN 適用ボタン */
     .tzn-buttons {
       display: grid;
@@ -298,7 +345,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V9</h1>
+      <h1>ISOXML 施肥設計アプリ V10</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -349,9 +396,30 @@
       <section id="cellSection" class="section">
         <h2>5. TZN の編集</h2>
         <p class="small">
-          地図右上の作図ツールで範囲を描くと、その中のセルを選択します。
-          矩形、多角形、フリーハンドに対応しています。
+          ツールを選び、地図上で範囲を描くと、その中のセルを選択します。
         </p>
+
+        <div class="draw-tools" id="drawTools">
+          <button type="button" id="toolRectangle" title="矩形で選択">
+            <svg viewBox="0 0 24 24">
+              <rect x="4" y="6" width="16" height="12" />
+            </svg>
+            <span>矩形</span>
+          </button>
+          <button type="button" id="toolPolygon" title="多角形で選択">
+            <svg viewBox="0 0 24 24">
+              <polygon points="12,4 20,10 17,19 7,19 4,10" />
+            </svg>
+            <span>多角形</span>
+          </button>
+          <button type="button" id="toolFreehand" title="フリーハンドで選択">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 14c1-5 5-9 9-8s6 5 5 9-5 6-9 5-5-4-5-6z" />
+            </svg>
+            <span>フリーハンド</span>
+          </button>
+        </div>
+
         <div id="selectionInfo" class="info-box">セルが選択されていません。</div>
 
         <h3>TZN を設定</h3>
@@ -427,7 +495,7 @@
       "esri/identity/IdentityManager",
       "esri/portal/Portal",
       "esri/portal/PortalQueryParams",
-      "esri/widgets/Sketch",
+      "esri/widgets/Sketch/SketchViewModel",
       "esri/widgets/LayerList",
       "esri/widgets/Legend",
       "esri/widgets/BasemapGallery",
@@ -445,7 +513,7 @@
       esriId,
       Portal,
       PortalQueryParams,
-      Sketch,
+      SketchViewModel,
       LayerList,
       Legend,
       BasemapGallery,
@@ -574,6 +642,9 @@
         fieldStatus: dom("fieldStatus"),
 
         cellSection: dom("cellSection"),
+        toolRectangle: dom("toolRectangle"),
+        toolPolygon: dom("toolPolygon"),
+        toolFreehand: dom("toolFreehand"),
         selectionInfo: dom("selectionInfo"),
         tznButtons: dom("tznButtons"),
         selectionClearBtn: dom("selectionClearBtn"),
@@ -609,8 +680,8 @@
 
         // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
         selection: new globalThis.Map(),
-        sketch: null,
-        sketchExpand: null,
+        sketchViewModel: null,
+        activeTool: null,
 
         // 統計
         statsScope: "field"
@@ -661,7 +732,7 @@
         listMode: "hide"
       });
 
-      // 作図ツールの描画用
+      // 作図中の図形用
       const sketchLayer = new GraphicsLayer({
         title: "選択範囲",
         listMode: "hide"
@@ -898,7 +969,7 @@
 
           setStatus(ui.webmapStatus, "読み込み中: " + item.title);
 
-          removeSketch();
+          cancelDrawing();
           clearSelection();
 
           const webmap = new WebMap({ portalItem: item });
@@ -1024,7 +1095,7 @@
 
         const index = ui.rxLayerSelect.value;
 
-        removeSketch();
+        cancelDrawing();
         clearSelection();
 
         if (index === "") {
@@ -1042,7 +1113,7 @@
           state.resolved = resolveAllFields(state.rxLayer);
 
           applyTznRenderer(state.rxLayer);
-          setupSketch();
+          setupSketchViewModel();
 
           // 透過度スライダーを現在値に合わせる
           syncOpacitySlider();
@@ -1283,35 +1354,47 @@
       // ==========================================================
       // 5. TZN の編集
       //
-      //  Sketch ウィジェットで範囲を描き、
+      //  SketchViewModel で範囲を描き、
       //  範囲内のセルを選択して TZN を一括設定する。
+      //
+      //  Sketch ウィジェットのツールバーには
+      //  フリーハンドのボタンが用意されていないため、
+      //  SketchViewModel を直接操作して
+      //  create("polygon", { mode: "freehand" }) を呼び出す。
       // ==========================================================
 
-      // ----- 作図ツール -----
+      // ----- 作図 -----
 
-      function setupSketch() {
+      function setupSketchViewModel() {
 
-        removeSketch();
+        if (state.sketchViewModel) {
+          state.sketchViewModel.destroy();
+          state.sketchViewModel = null;
+        }
 
-        state.sketch = new Sketch({
+        state.sketchViewModel = new SketchViewModel({
           view: view,
           layer: sketchLayer,
-          creationMode: "single",
-          // 矩形、多角形、フリーハンド
-          availableCreateTools: ["rectangle", "polygon", "freehandPolygon"],
-          visibleElements: {
-            selectionTools: {
-              "rectangle-selection": false,
-              "lasso-selection": false
-            },
-            settingsMenu: false,
-            undoRedoMenu: false,
-            duplicateButton: false
+          defaultCreateOptions: { hasZ: false },
+          polygonSymbol: {
+            type: "simple-fill",
+            color: [0, 122, 194, 0.12],
+            outline: {
+              color: [0, 122, 194],
+              width: 1.6,
+              style: "dash"
+            }
           }
         });
 
         // 描画完了時に範囲内のセルを選択する
-        state.sketch.on("create", function (event) {
+        state.sketchViewModel.on("create", function (event) {
+
+          if (event.state === "cancel") {
+            setActiveTool(null);
+            sketchLayer.removeAll();
+            return;
+          }
 
           if (event.state !== "complete") {
             return;
@@ -1321,42 +1404,103 @@
 
           // 描いた図形は選択後に消す
           sketchLayer.removeAll();
+          setActiveTool(null);
 
           selectByGeometry(geometry);
         });
 
-        state.sketchExpand = new Expand({
-          view: view,
-          content: state.sketch,
-          expandTooltip: "範囲を描いてセルを選択",
-          expandIcon: "cursor-marquee",
-          expanded: false
-        });
-
-        view.ui.add(state.sketchExpand, "top-right");
-
         setStatus(
           ui.cellStatus,
-          "地図右上の作図ツールから範囲を描いてください。\n" +
+          "ツールを選び、地図上で範囲を描いてください。\n" +
           "矩形、多角形、フリーハンドに対応しています。"
         );
       }
 
-      function removeSketch() {
+      // 作図を開始する
+      //   freehand を指定すると polygon のフリーハンドになる
+      function startDrawing(tool) {
 
-        if (state.sketchExpand) {
-          view.ui.remove(state.sketchExpand);
-          state.sketchExpand.destroy();
-          state.sketchExpand = null;
+        if (!state.sketchViewModel) {
+          return;
         }
 
-        if (state.sketch) {
-          state.sketch.destroy();
-          state.sketch = null;
+        // 同じツールを再度押したら解除する
+        if (state.activeTool === tool) {
+          cancelDrawing();
+          return;
+        }
+
+        state.sketchViewModel.cancel();
+        sketchLayer.removeAll();
+
+        setActiveTool(tool);
+
+        if (tool === "freehand") {
+
+          state.sketchViewModel.create("polygon", { mode: "freehand" });
+
+          setStatus(
+            ui.cellStatus,
+            "フリーハンドで描画します。\n" +
+            "地図上をドラッグしてください。"
+          );
+
+          return;
+        }
+
+        if (tool === "rectangle") {
+
+          state.sketchViewModel.create("rectangle");
+
+          setStatus(
+            ui.cellStatus,
+            "矩形で描画します。\n" +
+            "地図上をドラッグしてください。"
+          );
+
+          return;
+        }
+
+        state.sketchViewModel.create("polygon");
+
+        setStatus(
+          ui.cellStatus,
+          "多角形で描画します。\n" +
+          "クリックで頂点を追加し、ダブルクリックで確定します。"
+        );
+      }
+
+      function cancelDrawing() {
+
+        if (state.sketchViewModel) {
+          state.sketchViewModel.cancel();
         }
 
         sketchLayer.removeAll();
+        setActiveTool(null);
       }
+
+      // ツールボタンの選択状態を更新する
+      function setActiveTool(tool) {
+
+        state.activeTool = tool;
+
+        ui.toolRectangle.className = tool === "rectangle" ? "active" : "";
+        ui.toolPolygon.className = tool === "polygon" ? "active" : "";
+        ui.toolFreehand.className = tool === "freehand" ? "active" : "";
+      }
+
+      ui.toolRectangle.onclick = function () {
+        startDrawing("rectangle");
+      };
+
+      ui.toolPolygon.onclick = function () {
+        startDrawing("polygon");
+      };
+
+      ui.toolFreehand.onclick = function () {
+        startDrawing("freehand");
+      };
 
       // ----- 選択 -----
 
@@ -1625,6 +1769,7 @@
       }
 
       ui.selectionClearBtn.onclick = function () {
+        cancelDrawing();
         clearSelection();
         setStatus(ui.cellStatus, "選択を解除しました。");
       };
