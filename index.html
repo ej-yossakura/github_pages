@@ -3468,9 +3468,19 @@
           };
         });
 
-        // GRD バイナリは行優先、同一行では列順
+        // GRD バイナリは南西隅から、南から北へ、西から東へ並べる
+        //
+        //   idx_row は Generate Tessellation の GRID_ID に由来し、
+        //   北から南へ番号が下がる場合がある。
+        //   ISOXML は南西原点のため、中心座標で並べ替える。
         cells.sort(function (a, b) {
-          return a.row === b.row ? a.col - b.col : a.row - b.row;
+
+          // 緯度の差が微小なら同じ行とみなす
+          if (Math.abs(a.y - b.y) > 1e-9) {
+            return a.y - b.y;
+          }
+
+          return a.x - b.x;
         });
 
         return cells;
