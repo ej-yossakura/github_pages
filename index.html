@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ISOXML 施肥設計アプリ V5</title>
+  <title>ISOXML 施肥設計アプリ V6</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -151,13 +151,50 @@
       color: #5f6b7a;
     }
 
+    /* TZN 選択ボタン */
+    .tzn-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .tzn-buttons button {
+      margin: 0;
+      padding: 6px 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #1f2937;
+      border: 1px solid #c3ccd6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+
+    .tzn-buttons button:hover:not(:disabled) {
+      background: #eef5fb;
+      border-color: #007ac2;
+    }
+
+    .tzn-buttons button.selected {
+      background: #007ac2;
+      color: #fff;
+      border-color: #007ac2;
+    }
+
+    .tzn-buttons button:disabled {
+      background: #f1f3f5;
+      color: #9ca3af;
+    }
+
     /* セル編集パネル */
     #cellEditorPanel {
       background: #fff;
       border: 1px solid #b8c2cc;
       border-radius: 4px;
       padding: 12px;
-      width: 240px;
+      width: 250px;
       box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
       font-size: 12px;
     }
@@ -167,32 +204,29 @@
       font-size: 13px;
     }
 
-    #cellEditorPanel dl {
-      margin: 0 0 8px;
-      display: grid;
-      grid-template-columns: 76px 1fr;
-      gap: 3px 6px;
-    }
-
-    #cellEditorPanel dt {
+    #cellEditorPanel .hint {
       color: #5f6b7a;
+      line-height: 1.5;
     }
 
-    #cellEditorPanel dd {
-      margin: 0;
-      font-weight: 600;
-      overflow-wrap: anywhere;
-    }
-
-    #cellEditorPanel input {
-      margin-top: 2px;
-      text-align: right;
+    #selectionInfo {
+      margin-top: 8px;
+      padding: 8px;
+      background: #f3f4f6;
+      border-radius: 4px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      min-height: 18px;
     }
 
     .btn-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px;
+    }
+
+    .btn-row button {
+      margin-top: 0;
     }
 
     @media (max-width: 780px) {
@@ -214,7 +248,7 @@
   <div id="app">
     <aside id="panel">
 
-      <h1>ISOXML 施肥設計アプリ V5a</h1>
+      <h1>ISOXML 施肥設計アプリ V6</h1>
       <p class="small">施肥設計レイヤーを編集し、ISOXML を出力します。</p>
 
       <!-- ========== 1. サインイン ========== -->
@@ -254,9 +288,20 @@
         <div id="fieldStatus" class="info-box">未選択</div>
       </section>
 
-      <!-- ========== 5. PDV編集 ========== -->
+      <!-- ========== 5. TZN編集 ========== -->
+      <section id="cellSection" class="section">
+        <h2>5. TZN の編集</h2>
+        <p class="small">
+          地図上のセルをクリックまたは矩形ドラッグで複数選択し、
+          TZN を一括で変更します。
+        </p>
+        <button id="cellEditToggle">TZN 編集モードを開始</button>
+        <div id="cellStatus" class="info-box">TZN 編集モードは停止中です。</div>
+      </section>
+
+      <!-- ========== 6. PDV編集 ========== -->
       <section id="pdvSection" class="section">
-        <h2>5. 散布量（PDV）の編集</h2>
+        <h2>6. 散布量（PDV）の編集</h2>
         <p class="small">
           選択した圃場の TZN ごとに散布量を設定します。
           同一圃場・同一 TZN のセルには同じ値が書き込まれます。
@@ -277,16 +322,6 @@
         <div id="pdvStatus" class="info-box">圃場を選択してください。</div>
       </section>
 
-      <!-- ========== 6. セル単位編集 ========== -->
-      <section id="cellSection" class="section">
-        <h2>6. セル単位の PDV 編集</h2>
-        <p class="small">
-          地図上のセルをクリックすると、そのセルの PDV を個別に編集できます。
-        </p>
-        <button id="cellEditToggle">セル編集モードを開始</button>
-        <div id="cellStatus" class="info-box">セル編集モードは停止中です。</div>
-      </section>
-
       <!-- ========== 7. ISOXML出力 ========== -->
       <section id="exportSection" class="section">
         <h2>7. ISOXML の出力</h2>
@@ -301,40 +336,29 @@
         <div id="exportStatus" class="info-box">未出力</div>
       </section>
 
-      <!-- ========== 8. ISOXML確認 ========== -->
-      <h2>8. ISOXML の確認</h2>
-      <p class="small">出力した TASKDATA.XML と GRD*.bin を読み込んで表示します。</p>
-      <input id="files" type="file" multiple accept=".xml,.bin,.txt,.zip">
-      <button id="isoLoadBtn">ISOXML を読み込んで表示</button>
-      <button id="isoClearBtn" class="secondary">ISOXML 表示をクリア</button>
-      <select id="isoFieldSelect" disabled>
-        <option value="">圃場を選択してください</option>
-      </select>
-      <div id="isoStatus" class="info-box">未読込</div>
-      <div id="isoLegend"></div>
-
     </aside>
     <main id="viewDiv"></main>
   </div>
 
-  <!-- セル編集パネル（地図上に配置） -->
+  <!-- TZN 編集パネル（地図上に配置） -->
   <div id="cellEditorPanel" style="display:none;">
-    <h3>セルの PDV 編集</h3>
-    <dl>
-      <dt>グリッド ID</dt>
-      <dd id="cellGridId">-</dd>
-      <dt>圃場</dt>
-      <dd id="cellFieldId">-</dd>
-      <dt>TZN</dt>
-      <dd id="cellTzn">-</dd>
-    </dl>
-    <label class="small" for="cellPdvInput">PDV (mg/m²)</label>
-    <input id="cellPdvInput" type="number" min="0" step="1">
-    <div class="btn-row">
-      <button id="cellSaveBtn">保存</button>
+    <h3>TZN の一括編集</h3>
+    <p class="hint">
+      クリックで選択、Ctrl または Shift を押しながらクリックで追加選択。
+      Shift を押しながらドラッグで矩形選択します。
+    </p>
+
+    <div id="selectionInfo">セルが選択されていません。</div>
+
+    <label class="small">TZN を設定</label>
+    <div class="tzn-buttons" id="tznButtons"></div>
+
+    <div class="btn-row" style="margin-top:10px;">
+      <button id="selectionClearBtn" class="secondary">選択解除</button>
       <button id="cellCloseBtn" class="secondary">閉じる</button>
     </div>
-    <div id="cellEditStatus" class="info-box">セルをクリックしてください。</div>
+
+    <div id="cellEditStatus" class="info-box">セルを選択してください。</div>
   </div>
 
   <script>
@@ -344,6 +368,7 @@
       "esri/views/MapView",
       "esri/Graphic",
       "esri/geometry/Polygon",
+      "esri/geometry/Extent",
       "esri/layers/GraphicsLayer",
       "esri/identity/OAuthInfo",
       "esri/identity/IdentityManager",
@@ -361,6 +386,7 @@
       MapView,
       Graphic,
       Polygon,
+      Extent,
       GraphicsLayer,
       OAuthInfo,
       esriId,
@@ -420,6 +446,10 @@
           5: "レベル 5"
         },
 
+        // 選択ハイライトの色
+        selectionColor: [255, 255, 0, 0.35],
+        selectionOutline: [255, 140, 0],
+
         // ISOXML 出力設定
         isoxml: {
           versionMajor: "3",
@@ -473,36 +503,27 @@
         zoomFieldBtn: dom("zoomFieldBtn"),
         fieldStatus: dom("fieldStatus"),
 
+        cellSection: dom("cellSection"),
+        cellEditToggle: dom("cellEditToggle"),
+        cellStatus: dom("cellStatus"),
+
+        cellEditorPanel: dom("cellEditorPanel"),
+        selectionInfo: dom("selectionInfo"),
+        tznButtons: dom("tznButtons"),
+        selectionClearBtn: dom("selectionClearBtn"),
+        cellCloseBtn: dom("cellCloseBtn"),
+        cellEditStatus: dom("cellEditStatus"),
+
         pdvSection: dom("pdvSection"),
         pdvTableBody: dom("pdvTableBody"),
         pdvApplyBtn: dom("pdvApplyBtn"),
         pdvReloadBtn: dom("pdvReloadBtn"),
         pdvStatus: dom("pdvStatus"),
 
-        cellSection: dom("cellSection"),
-        cellEditToggle: dom("cellEditToggle"),
-        cellStatus: dom("cellStatus"),
-
-        cellEditorPanel: dom("cellEditorPanel"),
-        cellGridId: dom("cellGridId"),
-        cellFieldId: dom("cellFieldId"),
-        cellTzn: dom("cellTzn"),
-        cellPdvInput: dom("cellPdvInput"),
-        cellSaveBtn: dom("cellSaveBtn"),
-        cellCloseBtn: dom("cellCloseBtn"),
-        cellEditStatus: dom("cellEditStatus"),
-
         exportSection: dom("exportSection"),
         exportScope: dom("exportScope"),
         exportBtn: dom("exportBtn"),
-        exportStatus: dom("exportStatus"),
-
-        files: dom("files"),
-        isoLoadBtn: dom("isoLoadBtn"),
-        isoClearBtn: dom("isoClearBtn"),
-        isoFieldSelect: dom("isoFieldSelect"),
-        isoStatus: dom("isoStatus"),
-        isoLegend: dom("isoLegend")
+        exportStatus: dom("exportStatus")
       };
 
       const state = {
@@ -513,10 +534,13 @@
         resolved: {},
         fields: [],
         currentField: null,
+
+        // TZN 編集
         cellEditMode: false,
-        cellEditHandle: null,
-        cellFeature: null,
-        isoTasks: new globalThis.Map()
+        handles: [],
+        // 選択中のフィーチャ: objectId -> { objectId, attributes, geometry }
+        selection: new globalThis.Map(),
+        dragOrigin: null
       };
 
       function setStatus(element, message, isError) {
@@ -545,14 +569,15 @@
       // マップ初期化
       // ==========================================================
 
-      const isoLayer = new GraphicsLayer({
-        title: "ISOXML 確認（ファイル）",
-        listMode: "show"
+      // 選択セルのハイライト用
+      const selectionLayer = new GraphicsLayer({
+        title: "選択中のセル",
+        listMode: "hide"
       });
 
       let map = new ArcGISMap({
         basemap: "topo-vector",
-        layers: [isoLayer]
+        layers: [selectionLayer]
       });
 
       const view = new MapView({
@@ -611,7 +636,7 @@
           "top-right"
         );
 
-        // セル編集パネルを地図右下へ配置
+        // TZN 編集パネルを地図右下へ配置
         view.ui.add(ui.cellEditorPanel, "bottom-right");
       }
 
@@ -659,8 +684,8 @@
           ui.webmapSection,
           ui.layerSection,
           ui.fieldSection,
-          ui.pdvSection,
           ui.cellSection,
+          ui.pdvSection,
           ui.exportSection
         ].forEach(hide);
       }
@@ -790,8 +815,8 @@
           await webmap.load();
           await webmap.loadAll();
 
-          isoLayer.removeAll();
-          webmap.add(isoLayer);
+          selectionLayer.removeAll();
+          webmap.add(selectionLayer);
 
           view.map = webmap;
           map = webmap;
@@ -889,7 +914,7 @@
             true
           );
 
-          [ui.fieldSection, ui.pdvSection, ui.cellSection, ui.exportSection]
+          [ui.fieldSection, ui.cellSection, ui.pdvSection, ui.exportSection]
             .forEach(hide);
 
           return;
@@ -910,7 +935,7 @@
         stopCellEdit();
 
         if (index === "") {
-          [ui.fieldSection, ui.pdvSection, ui.cellSection, ui.exportSection]
+          [ui.fieldSection, ui.cellSection, ui.pdvSection, ui.exportSection]
             .forEach(hide);
           return;
         }
@@ -1107,6 +1132,9 @@
 
         const fieldId = ui.fieldSelect.value;
 
+        // 圃場が変わったら選択を解除
+        clearSelection();
+
         if (!fieldId) {
           state.currentField = null;
           ui.zoomFieldBtn.disabled = true;
@@ -1130,7 +1158,501 @@
       };
 
       // ==========================================================
-      // 5. 圃場単位の PDV 編集
+      // 5. TZN の編集
+      //
+      //  複数フィーチャを選択して TZN を一括変更する。
+      //  クリック選択、Ctrl/Shift クリックで追加選択、
+      //  Shift ドラッグで矩形選択に対応する。
+      // ==========================================================
+
+      // TZN 設定ボタンを構築
+      function buildTznButtons() {
+
+        ui.tznButtons.innerHTML = "";
+
+        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
+
+          const button = document.createElement("button");
+          button.type = "button";
+          button.id = "tznButton" + zone;
+          button.disabled = true;
+          button.title = CONFIG.tznLabels[zone];
+
+          const swatch = document.createElement("span");
+          swatch.className = "swatch";
+          swatch.style.background = rgba(zone);
+
+          const label = document.createElement("span");
+          label.textContent = zone;
+
+          button.append(swatch, label);
+
+          button.onclick = function () {
+            applyTznToSelection(zone);
+          };
+
+          ui.tznButtons.append(button);
+        }
+      }
+
+      buildTznButtons();
+
+      function setTznButtonsEnabled(enabled) {
+        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
+          dom("tznButton" + zone).disabled = !enabled;
+        }
+      }
+
+      // 選択ハイライトを再描画
+      function refreshSelectionGraphics() {
+
+        selectionLayer.removeAll();
+
+        state.selection.forEach(function (item) {
+
+          if (!item.geometry) {
+            return;
+          }
+
+          selectionLayer.add(new Graphic({
+            geometry: item.geometry,
+            symbol: {
+              type: "simple-fill",
+              color: CONFIG.selectionColor,
+              outline: {
+                color: CONFIG.selectionOutline,
+                width: 1.6
+              }
+            }
+          }));
+        });
+      }
+
+      // 選択情報の表示を更新
+      function updateSelectionInfo() {
+
+        const count = state.selection.size;
+
+        if (!count) {
+          ui.selectionInfo.textContent = "セルが選択されていません。";
+          setTznButtonsEnabled(false);
+          return;
+        }
+
+        // 選択中セルの TZN 内訳
+        const counts = {};
+
+        state.selection.forEach(function (item) {
+          const zone = Number(item.attributes[state.resolved.tzn]);
+          counts[zone] = (counts[zone] || 0) + 1;
+        });
+
+        const parts = Object.keys(counts)
+          .sort(function (a, b) { return Number(a) - Number(b); })
+          .map(function (zone) {
+            return "TZN " + zone + ": " + counts[zone] + " 件";
+          });
+
+        ui.selectionInfo.textContent =
+          "選択セル数: " + count + "\n" + parts.join("\n");
+
+        setTznButtonsEnabled(true);
+      }
+
+      function clearSelection() {
+        state.selection.clear();
+        selectionLayer.removeAll();
+        updateSelectionInfo();
+      }
+
+      // 選択へ追加または解除
+      function toggleSelection(features, additive) {
+
+        if (!additive) {
+          state.selection.clear();
+        }
+
+        features.forEach(function (feature) {
+
+          const objectId = feature.attributes[state.rxLayer.objectIdField];
+
+          if (additive && state.selection.has(objectId)) {
+            // 追加選択モードで既に選択済みなら解除
+            state.selection.delete(objectId);
+            return;
+          }
+
+          state.selection.set(objectId, {
+            objectId: objectId,
+            attributes: feature.attributes,
+            geometry: feature.geometry
+          });
+        });
+
+        refreshSelectionGraphics();
+        updateSelectionInfo();
+      }
+
+      // ジオメトリ範囲でセルを問い合わせ
+      async function queryCellsByGeometry(geometry) {
+
+        const query = state.rxLayer.createQuery();
+        query.geometry = geometry;
+        query.spatialRelationship = "intersects";
+        query.outFields = [
+          state.rxLayer.objectIdField,
+          state.resolved.fieldId,
+          state.resolved.tzn,
+          state.resolved.pdv
+        ];
+        query.returnGeometry = true;
+        query.num = CONFIG.queryLimit;
+
+        // 圃場が選択されている場合はその圃場に限定
+        if (state.currentField) {
+          query.where = fieldWhereClause(state.currentField);
+        }
+
+        const result = await state.rxLayer.queryFeatures(query);
+
+        return result.features;
+      }
+
+      // クリックによる選択
+      async function onMapClickForTznEdit(event) {
+
+        if (!state.cellEditMode || !state.rxLayer) {
+          return;
+        }
+
+        // 矩形ドラッグ中は処理しない
+        if (state.dragOrigin) {
+          return;
+        }
+
+        event.stopPropagation();
+
+        try {
+
+          setStatus(ui.cellEditStatus, "セルを取得中...");
+
+          const response = await view.hitTest(event, {
+            include: [state.rxLayer]
+          });
+
+          const hit = response.results.find(function (item) {
+            return item.graphic && item.graphic.layer === state.rxLayer;
+          });
+
+          const additive =
+            event.native &&
+            (event.native.ctrlKey || event.native.shiftKey || event.native.metaKey);
+
+          if (!hit) {
+
+            if (!additive) {
+              clearSelection();
+              setStatus(ui.cellEditStatus, "選択を解除しました。");
+            } else {
+              setStatus(ui.cellEditStatus, "セルが見つかりません。");
+            }
+
+            return;
+          }
+
+          const objectId = hit.graphic.attributes[state.rxLayer.objectIdField];
+
+          // 属性とジオメトリを確実に取得するため再クエリする
+          const query = state.rxLayer.createQuery();
+          query.objectIds = [objectId];
+          query.outFields = ["*"];
+          query.returnGeometry = true;
+
+          const result = await state.rxLayer.queryFeatures(query);
+
+          if (!result.features.length) {
+            setStatus(ui.cellEditStatus, "属性を取得できません。", true);
+            return;
+          }
+
+          toggleSelection(result.features, additive);
+
+          setStatus(
+            ui.cellEditStatus,
+            state.selection.size
+              ? "TZN ボタンで値を設定してください。"
+              : "選択を解除しました。"
+          );
+
+        } catch (error) {
+          console.error(error);
+          setStatus(ui.cellEditStatus, "取得に失敗しました: " + errorText(error), true);
+        }
+      }
+
+      // 矩形ドラッグによる選択
+      async function onMapDragForTznEdit(event) {
+
+        if (!state.cellEditMode || !state.rxLayer) {
+          return;
+        }
+
+        // Shift ドラッグのときのみ矩形選択とする
+        if (!event.native || !event.native.shiftKey) {
+          return;
+        }
+
+        // 地図のパンを抑止
+        event.stopPropagation();
+
+        if (event.action === "start") {
+
+          state.dragOrigin = view.toMap({ x: event.x, y: event.y });
+          return;
+        }
+
+        if (event.action === "end") {
+
+          const origin = state.dragOrigin;
+          state.dragOrigin = null;
+
+          if (!origin) {
+            return;
+          }
+
+          const corner = view.toMap({ x: event.x, y: event.y });
+
+          if (!corner) {
+            return;
+          }
+
+          const extent = new Extent({
+            xmin: Math.min(origin.x, corner.x),
+            ymin: Math.min(origin.y, corner.y),
+            xmax: Math.max(origin.x, corner.x),
+            ymax: Math.max(origin.y, corner.y),
+            spatialReference: view.spatialReference
+          });
+
+          // 範囲が極端に小さい場合はクリック扱いとする
+          if (extent.width <= 0 || extent.height <= 0) {
+            return;
+          }
+
+          try {
+
+            setStatus(ui.cellEditStatus, "範囲内のセルを取得中...");
+
+            const features = await queryCellsByGeometry(extent);
+
+            if (!features.length) {
+              setStatus(ui.cellEditStatus, "範囲内にセルがありません。");
+              return;
+            }
+
+            // 矩形選択は常に追加選択とする
+            toggleSelectionAdd(features);
+
+            setStatus(
+              ui.cellEditStatus,
+              features.length + " 件を選択に追加しました。"
+            );
+
+          } catch (error) {
+            console.error(error);
+            setStatus(ui.cellEditStatus, "取得に失敗しました: " + errorText(error), true);
+          }
+        }
+      }
+
+      // 矩形選択用: 既存選択へ追加のみ行う
+      function toggleSelectionAdd(features) {
+
+        features.forEach(function (feature) {
+
+          const objectId = feature.attributes[state.rxLayer.objectIdField];
+
+          state.selection.set(objectId, {
+            objectId: objectId,
+            attributes: feature.attributes,
+            geometry: feature.geometry
+          });
+        });
+
+        refreshSelectionGraphics();
+        updateSelectionInfo();
+      }
+
+      // 選択中セルへ TZN を適用
+      async function applyTznToSelection(zone) {
+
+        if (!state.selection.size || !state.rxLayer) {
+          return;
+        }
+
+        try {
+
+          setStatus(ui.cellEditStatus, "保存中...");
+          setTznButtonsEnabled(false);
+
+          const updates = [];
+
+          state.selection.forEach(function (item) {
+
+            // 変更がある行のみ更新対象にする
+            if (Number(item.attributes[state.resolved.tzn]) === zone) {
+              return;
+            }
+
+            const attributes = {};
+            attributes[state.rxLayer.objectIdField] = item.objectId;
+            attributes[state.resolved.tzn] = zone;
+
+            // TZN 0 は散布なしのため PDV も 0 にする
+            if (zone === 0 && state.resolved.pdv) {
+              attributes[state.resolved.pdv] = 0;
+            }
+
+            updates.push({ attributes: attributes });
+          });
+
+          if (!updates.length) {
+            setTznButtonsEnabled(true);
+            setStatus(ui.cellEditStatus, "変更はありませんでした。");
+            return;
+          }
+
+          const editResult = await state.rxLayer.applyEdits({
+            updateFeatures: updates
+          });
+
+          const failed = editResult.updateFeatureResults.filter(function (item) {
+            return item.error;
+          });
+
+          setTznButtonsEnabled(true);
+
+          if (failed.length) {
+
+            console.error(failed);
+
+            setStatus(
+              ui.cellEditStatus,
+              "一部の更新に失敗しました。\n成功: " +
+              (updates.length - failed.length) + " 件\n失敗: " +
+              failed.length + " 件\n" + errorText(failed[0].error),
+              true
+            );
+
+            return;
+          }
+
+          // 選択情報の属性を更新
+          state.selection.forEach(function (item) {
+
+            item.attributes[state.resolved.tzn] = zone;
+
+            if (zone === 0 && state.resolved.pdv) {
+              item.attributes[state.resolved.pdv] = 0;
+            }
+          });
+
+          updateSelectionInfo();
+
+          setStatus(
+            ui.cellEditStatus,
+            "TZN を " + zone + " に設定しました。\n更新セル数: " + updates.length
+          );
+
+          state.rxLayer.refresh();
+
+          // 圃場単位の集計も更新
+          if (state.currentField) {
+            loadPdvForField(state.currentField);
+          }
+
+        } catch (error) {
+          console.error(error);
+          setTznButtonsEnabled(true);
+          setStatus(ui.cellEditStatus, "保存に失敗しました: " + errorText(error), true);
+        }
+      }
+
+      function startCellEdit() {
+
+        if (!state.rxLayer) {
+          return;
+        }
+
+        state.cellEditMode = true;
+
+        ui.cellEditToggle.textContent = "TZN 編集モードを終了";
+        ui.cellEditToggle.className = "secondary";
+
+        setStatus(
+          ui.cellStatus,
+          "TZN 編集モード中です。\n" +
+          "クリックで選択、Ctrl または Shift クリックで追加選択、\n" +
+          "Shift ドラッグで矩形選択します。"
+        );
+
+        ui.cellEditorPanel.style.display = "";
+        setStatus(ui.cellEditStatus, "セルを選択してください。");
+
+        // 編集中はポップアップを抑止する
+        if (view.popup) {
+          view.popup.autoOpenEnabled = false;
+          view.popup.close();
+        }
+
+        state.handles.push(view.on("click", onMapClickForTznEdit));
+        state.handles.push(view.on("drag", onMapDragForTznEdit));
+
+        updateSelectionInfo();
+      }
+
+      function stopCellEdit() {
+
+        state.cellEditMode = false;
+        state.dragOrigin = null;
+
+        state.handles.forEach(function (handle) {
+          handle.remove();
+        });
+
+        state.handles = [];
+
+        ui.cellEditToggle.textContent = "TZN 編集モードを開始";
+        ui.cellEditToggle.className = "";
+
+        ui.cellEditorPanel.style.display = "none";
+
+        setStatus(ui.cellStatus, "TZN 編集モードは停止中です。");
+
+        if (view.popup) {
+          view.popup.autoOpenEnabled = true;
+        }
+
+        clearSelection();
+      }
+
+      ui.selectionClearBtn.onclick = function () {
+        clearSelection();
+        setStatus(ui.cellEditStatus, "選択を解除しました。");
+      };
+
+      ui.cellCloseBtn.onclick = stopCellEdit;
+
+      ui.cellEditToggle.onclick = function () {
+        if (state.cellEditMode) {
+          stopCellEdit();
+        } else {
+          startCellEdit();
+        }
+      };
+
+      // ==========================================================
+      // 6. 圃場単位の PDV 編集
       // ==========================================================
 
       function buildPdvTable() {
@@ -1396,205 +1918,6 @@
       ui.pdvReloadBtn.onclick = function () {
         if (state.currentField) {
           loadPdvForField(state.currentField);
-        }
-      };
-
-      // ==========================================================
-      // 6. セル単位の PDV 編集
-      //
-      //  Editor ウィジェットは使用せず、
-      //  PDV のみを編集する専用パネルを用いる。
-      // ==========================================================
-
-      function startCellEdit() {
-
-        if (!state.rxLayer) {
-          return;
-        }
-
-        state.cellEditMode = true;
-
-        ui.cellEditToggle.textContent = "セル編集モードを終了";
-        ui.cellEditToggle.className = "secondary";
-
-        setStatus(ui.cellStatus, "セル編集モード中です。地図上のセルをクリックしてください。");
-
-        ui.cellEditorPanel.style.display = "";
-        setStatus(ui.cellEditStatus, "セルをクリックしてください。");
-
-        state.cellEditHandle = view.on("click", onMapClickForCellEdit);
-      }
-
-      function stopCellEdit() {
-
-        state.cellEditMode = false;
-        state.cellFeature = null;
-
-        if (state.cellEditHandle) {
-          state.cellEditHandle.remove();
-          state.cellEditHandle = null;
-        }
-
-        ui.cellEditToggle.textContent = "セル編集モードを開始";
-        ui.cellEditToggle.className = "";
-
-        ui.cellEditorPanel.style.display = "none";
-
-        setStatus(ui.cellStatus, "セル編集モードは停止中です。");
-
-        clearCellPanel();
-      }
-
-      function clearCellPanel() {
-        ui.cellGridId.textContent = "-";
-        ui.cellFieldId.textContent = "-";
-        ui.cellTzn.textContent = "-";
-        ui.cellPdvInput.value = "";
-        ui.cellSaveBtn.disabled = true;
-      }
-
-      async function onMapClickForCellEdit(event) {
-
-        if (!state.cellEditMode || !state.rxLayer) {
-          return;
-        }
-
-        try {
-
-          setStatus(ui.cellEditStatus, "セルを取得中...");
-
-          // クリック位置でヒットテスト
-          const response = await view.hitTest(event, {
-            include: [state.rxLayer]
-          });
-
-          const hit = response.results.find(function (item) {
-            return item.graphic && item.graphic.layer === state.rxLayer;
-          });
-
-          if (!hit) {
-            clearCellPanel();
-            setStatus(ui.cellEditStatus, "セルが見つかりません。", true);
-            return;
-          }
-
-          const objectId =
-            hit.graphic.attributes[state.rxLayer.objectIdField];
-
-          // 属性を確実に取得するため再クエリする
-          const query = state.rxLayer.createQuery();
-          query.objectIds = [objectId];
-          query.outFields = ["*"];
-          query.returnGeometry = false;
-
-          const result = await state.rxLayer.queryFeatures(query);
-
-          if (!result.features.length) {
-            clearCellPanel();
-            setStatus(ui.cellEditStatus, "属性を取得できません。", true);
-            return;
-          }
-
-          const feature = result.features[0];
-
-          state.cellFeature = feature;
-
-          const attributes = feature.attributes;
-
-          ui.cellGridId.textContent = state.resolved.gridId
-            ? (attributes[state.resolved.gridId] ?? "-")
-            : "（フィールドなし）";
-
-          ui.cellFieldId.textContent =
-            attributes[state.resolved.fieldId] ?? "-";
-
-          ui.cellTzn.textContent =
-            attributes[state.resolved.tzn] ?? "-";
-
-          const pdvValue = attributes[state.resolved.pdv];
-
-          ui.cellPdvInput.value =
-            (pdvValue === null || pdvValue === undefined) ? "" : pdvValue;
-
-          ui.cellSaveBtn.disabled = false;
-
-          setStatus(ui.cellEditStatus, "PDV を入力して保存してください。");
-
-        } catch (error) {
-          console.error(error);
-          setStatus(ui.cellEditStatus, "取得に失敗しました: " + errorText(error), true);
-        }
-      }
-
-      ui.cellSaveBtn.onclick = async function () {
-
-        if (!state.cellFeature) {
-          return;
-        }
-
-        try {
-
-          const raw = ui.cellPdvInput.value.trim();
-
-          if (raw === "") {
-            setStatus(ui.cellEditStatus, "PDV を入力してください。", true);
-            return;
-          }
-
-          const parsed = Number(raw);
-
-          if (!Number.isFinite(parsed) || parsed < 0) {
-            setStatus(ui.cellEditStatus, "PDV が不正です。", true);
-            return;
-          }
-
-          setStatus(ui.cellEditStatus, "保存中...");
-          ui.cellSaveBtn.disabled = true;
-
-          const attributes = {};
-          attributes[state.rxLayer.objectIdField] =
-            state.cellFeature.attributes[state.rxLayer.objectIdField];
-          attributes[state.resolved.pdv] = Math.round(parsed);
-
-          const editResult = await state.rxLayer.applyEdits({
-            updateFeatures: [{ attributes: attributes }]
-          });
-
-          const failed = editResult.updateFeatureResults.filter(function (item) {
-            return item.error;
-          });
-
-          ui.cellSaveBtn.disabled = false;
-
-          if (failed.length) {
-            console.error(failed);
-            setStatus(ui.cellEditStatus, "保存に失敗しました: " + errorText(failed[0].error), true);
-            return;
-          }
-
-          setStatus(ui.cellEditStatus, "保存しました。");
-
-          state.rxLayer.refresh();
-
-          // 圃場単位の集計も更新
-          if (state.currentField) {
-            loadPdvForField(state.currentField);
-          }
-
-        } catch (error) {
-          console.error(error);
-          ui.cellSaveBtn.disabled = false;
-          setStatus(ui.cellEditStatus, "保存に失敗しました: " + errorText(error), true);
-        }
-      };
-
-      ui.cellCloseBtn.onclick = stopCellEdit;
-
-      ui.cellEditToggle.onclick = function () {
-        if (state.cellEditMode) {
-          stopCellEdit();
-        } else {
-          startCellEdit();
         }
       };
 
@@ -2048,392 +2371,6 @@
       };
 
       ui.exportBtn.onclick = exporter.run;
-
-      // ==========================================================
-      // 8. ISOXML ファイルの確認
-      // ==========================================================
-
-      const isoxml = {};
-
-      isoxml.baseName = function (path) {
-        return path.replaceAll("\\", "/").split("/").pop().toUpperCase();
-      };
-
-      isoxml.collectFiles = async function (files) {
-
-        const fileMap = new globalThis.Map();
-
-        for (const file of files) {
-
-          if (file.name.toLowerCase().endsWith(".zip")) {
-
-            const zip = await JSZip.loadAsync(file);
-
-            for (const [path, item] of Object.entries(zip.files)) {
-              if (!item.dir && /\.(xml|bin|txt)$/i.test(path)) {
-                fileMap.set(
-                  isoxml.baseName(path),
-                  await item.async("arraybuffer")
-                );
-              }
-            }
-
-          } else if (/\.(xml|bin|txt)$/i.test(file.name)) {
-
-            fileMap.set(
-              isoxml.baseName(file.name),
-              await file.arrayBuffer()
-            );
-          }
-        }
-
-        return fileMap;
-      };
-
-      isoxml.findFile = function (fileMap, wanted) {
-
-        const key = wanted.toUpperCase();
-
-        if (fileMap.has(key)) {
-          return fileMap.get(key);
-        }
-
-        // 拡張子を txt へ変更した検証データにも対応
-        return fileMap.get(key.replace(/\.(XML|BIN)$/, ".TXT"));
-      };
-
-      isoxml.parseXml = function (buffer) {
-
-        const text = new TextDecoder("utf-8")
-          .decode(buffer)
-          .replace(/^\uFEFF/, "");
-
-        const doc = new DOMParser().parseFromString(text, "application/xml");
-
-        if (doc.querySelector("parsererror")) {
-          throw new Error("TASKDATA.XML を解析できません。");
-        }
-
-        return doc;
-      };
-
-      isoxml.taskName = function (task, doc) {
-
-        const pfdId = task.getAttribute("E");
-
-        const pfd = Array.from(doc.querySelectorAll("PFD"))
-          .find(function (item) {
-            return item.getAttribute("A") === pfdId;
-          });
-
-        return task.getAttribute("B")
-          || (pfd && pfd.getAttribute("C"))
-          || pfdId
-          || task.getAttribute("A")
-          || "圃場";
-      };
-
-      isoxml.vpnMap = function (doc) {
-
-        const result = {};
-
-        doc.querySelectorAll("ISO11783_TaskData > VPN")
-          .forEach(function (vpn) {
-            result[vpn.getAttribute("A")] = {
-              offset: Number(vpn.getAttribute("B") || 0),
-              scale: Number(vpn.getAttribute("C") || 1),
-              decimals: Number(vpn.getAttribute("D") || 0),
-              unit: vpn.getAttribute("E") || ""
-            };
-          });
-
-        return result;
-      };
-
-      isoxml.pdvInfo = function (task) {
-
-        const values = {};
-        const vpnIds = {};
-
-        task.querySelectorAll(":scope > TZN").forEach(function (tzn) {
-
-          const zone = Number(tzn.getAttribute("A"));
-          const pdv = tzn.querySelector(":scope > PDV");
-
-          values[zone] = pdv ? Number(pdv.getAttribute("B")) : null;
-          vpnIds[zone] = pdv ? pdv.getAttribute("E") : null;
-        });
-
-        return { values: values, vpnIds: vpnIds };
-      };
-
-      isoxml.format = function (value, decimals) {
-        return Number(value).toLocaleString("ja-JP", {
-          minimumFractionDigits: decimals,
-          maximumFractionDigits: decimals
-        });
-      };
-
-      isoxml.renderLegend = function (info) {
-
-        ui.isoLegend.innerHTML = "";
-
-        if (!info) {
-          return;
-        }
-
-        const table = document.createElement("table");
-        table.className = "grid";
-
-        const head = document.createElement("thead");
-        head.innerHTML =
-          "<tr><th style='width:30px;'>色</th>" +
-          "<th style='width:34px;'>TZN</th><th>散布量</th></tr>";
-
-        const body = document.createElement("tbody");
-
-        for (let zone = CONFIG.tznMin; zone <= CONFIG.tznMax; zone++) {
-
-          const row = document.createElement("tr");
-
-          const colorCell = document.createElement("td");
-          const swatch = document.createElement("span");
-          swatch.className = "swatch";
-          swatch.style.background = rgba(zone);
-          colorCell.append(swatch);
-
-          const zoneCell = document.createElement("td");
-          zoneCell.textContent = zone;
-
-          const valueCell = document.createElement("td");
-          valueCell.style.textAlign = "left";
-
-          const raw = info.values[zone];
-
-          let text = (raw === null || raw === undefined)
-            ? "未設定"
-            : raw + " mg/m²";
-
-          const vpn = info.vpnIds[zone] ? info.vpns[info.vpnIds[zone]] : null;
-
-          // 表示値 = (生データ + offset) × scale
-          if (vpn && raw !== null && Number.isFinite(raw)) {
-            const shown = (raw + vpn.offset) * vpn.scale;
-            text += " / " + isoxml.format(shown, vpn.decimals) + " " + vpn.unit;
-          }
-
-          if (zone === 0) {
-            text = "散布なし（" + text + "）";
-          }
-
-          valueCell.textContent = text;
-
-          row.append(colorCell, zoneCell, valueCell);
-          body.append(row);
-        }
-
-        table.append(head, body);
-        ui.isoLegend.append(table);
-      };
-
-      isoxml.symbol = function (zone) {
-        return {
-          type: "simple-fill",
-          color: CONFIG.colors[zone] || [80, 80, 80, 0.65],
-          outline: { color: [30, 30, 30, 0.4], width: 0.35 }
-        };
-      };
-
-      isoxml.render = async function () {
-
-        try {
-
-          setStatus(ui.isoStatus, "読み込み中...");
-
-          isoLayer.removeAll();
-          state.isoTasks.clear();
-          ui.isoLegend.innerHTML = "";
-
-          ui.isoFieldSelect.innerHTML =
-            '<option value="">圃場を選択してください</option>';
-          ui.isoFieldSelect.disabled = true;
-
-          const fileMap = await isoxml.collectFiles(ui.files.files);
-          const xmlBuffer = isoxml.findFile(fileMap, "TASKDATA.XML");
-
-          if (!xmlBuffer) {
-            throw new Error("TASKDATA.XML が見つかりません。");
-          }
-
-          const doc = isoxml.parseXml(xmlBuffer);
-          const vpns = isoxml.vpnMap(doc);
-
-          const tasks = Array.from(doc.querySelectorAll("TSK"))
-            .filter(function (task) {
-              return task.querySelector(":scope > GRD");
-            });
-
-          if (!tasks.length) {
-            throw new Error("GRD を持つ TSK が見つかりません。");
-          }
-
-          let total = 0;
-
-          for (const task of tasks) {
-
-            const grd = task.querySelector(":scope > GRD");
-            const name = isoxml.taskName(task, doc);
-            const pdv = isoxml.pdvInfo(task);
-
-            const south = Number(grd.getAttribute("A"));
-            const west = Number(grd.getAttribute("B"));
-            const dy = Number(grd.getAttribute("C"));
-            const dx = Number(grd.getAttribute("D"));
-            const cols = Number(grd.getAttribute("E"));
-            const rows = Number(grd.getAttribute("F"));
-            const gridName = grd.getAttribute("G");
-            const gridType = Number(grd.getAttribute("I"));
-
-            if (gridType !== 1) {
-              throw new Error(name + ": GRD Type 1 以外は未対応です。");
-            }
-
-            const binBuffer = isoxml.findFile(fileMap, gridName + ".BIN");
-
-            if (!binBuffer) {
-              throw new Error(gridName + ".bin が見つかりません。");
-            }
-
-            const values = new Uint8Array(binBuffer);
-            const expected = cols * rows;
-
-            if (values.length !== expected) {
-              throw new Error(
-                gridName + ": セル数不一致。期待=" + expected +
-                ", 実際=" + values.length
-              );
-            }
-
-            const graphics = [];
-            const taskId = task.getAttribute("A");
-
-            for (let r = 0; r < rows; r++) {
-
-              for (let c = 0; c < cols; c++) {
-
-                const zone = values[r * cols + c];
-
-                const x0 = west + c * dx;
-                const y0 = south + r * dy;
-
-                const graphic = new Graphic({
-                  geometry: new Polygon({
-                    spatialReference: { wkid: 4326 },
-                    rings: [[
-                      [x0, y0],
-                      [x0 + dx, y0],
-                      [x0 + dx, y0 + dy],
-                      [x0, y0 + dy],
-                      [x0, y0]
-                    ]]
-                  }),
-                  symbol: isoxml.symbol(zone),
-                  attributes: {
-                    field: name,
-                    task: taskId,
-                    grid: gridName,
-                    row: r + 1,
-                    column: c + 1,
-                    tzn: zone,
-                    pdv: pdv.values[zone] === undefined ? null : pdv.values[zone]
-                  },
-                  popupTemplate: {
-                    title: name + " | TZN " + zone,
-                    content: [{
-                      type: "fields",
-                      fieldInfos: [
-                        { fieldName: "grid", label: "GRD" },
-                        { fieldName: "row", label: "行" },
-                        { fieldName: "column", label: "列" },
-                        { fieldName: "tzn", label: "TZN" },
-                        { fieldName: "pdv", label: "PDV (mg/m²)" }
-                      ]
-                    }]
-                  }
-                });
-
-                isoLayer.add(graphic);
-                graphics.push(graphic);
-              }
-            }
-
-            state.isoTasks.set(taskId, {
-              name: name,
-              graphics: graphics,
-              values: pdv.values,
-              vpnIds: pdv.vpnIds,
-              vpns: vpns
-            });
-
-            const option = document.createElement("option");
-            option.value = taskId;
-            option.textContent = name + "（" + cols + " × " + rows + "）";
-            ui.isoFieldSelect.append(option);
-
-            total += expected;
-          }
-
-          ui.isoFieldSelect.disabled = false;
-
-          await view.goTo(isoLayer.graphics.toArray(), { padding: 40 });
-
-          setStatus(
-            ui.isoStatus,
-            "読込完了\n圃場: " + tasks.length + "\nセル: " + total
-          );
-
-        } catch (error) {
-          console.error(error);
-          setStatus(ui.isoStatus, "エラー: " + errorText(error), true);
-        }
-      };
-
-      isoxml.zoomToTask = async function () {
-
-        const info = state.isoTasks.get(ui.isoFieldSelect.value);
-
-        if (!info) {
-          isoxml.renderLegend(null);
-          return;
-        }
-
-        await view.goTo(info.graphics, { padding: 60 });
-
-        isoxml.renderLegend(info);
-
-        setStatus(
-          ui.isoStatus,
-          "選択圃場: " + info.name + "\nセル: " + info.graphics.length
-        );
-      };
-
-      isoxml.clear = function () {
-
-        isoLayer.removeAll();
-        state.isoTasks.clear();
-
-        ui.isoFieldSelect.innerHTML =
-          '<option value="">圃場を選択してください</option>';
-        ui.isoFieldSelect.disabled = true;
-
-        ui.isoLegend.innerHTML = "";
-
-        setStatus(ui.isoStatus, "表示をクリアしました。");
-      };
-
-      ui.isoLoadBtn.onclick = isoxml.render;
-      ui.isoClearBtn.onclick = isoxml.clear;
-      ui.isoFieldSelect.onchange = isoxml.zoomToTask;
 
     });
   </script>
