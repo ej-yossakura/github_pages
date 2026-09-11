@@ -2,17 +2,22 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ISOXML 処方マップビューア V2</title>
+<title>ISOXML 処方マップビューア V3</title>
 <link rel="stylesheet" href="https://js.arcgis.com/4.34/esri/themes/light/main.css">
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://js.arcgis.com/4.34/"></script>
 <style>
-html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif;color:#1f2937}#app{display:grid;grid-template-columns:365px 1fr}#panel{padding:16px;overflow:auto;border-right:1px solid #ccc;background:#fff}#viewDiv{height:100%}h1{font-size:19px;margin:0 0 8px}h2{font-size:15px;margin:18px 0 8px}.small{font-size:12px;color:#5f6b7a}.drop{border:2px dashed #718096;border-radius:8px;padding:14px;text-align:center;background:#f8fafc}input,select,button{box-sizing:border-box;width:100%;margin-top:8px;padding:8px;font-size:13px}button{border:0;border-radius:4px;background:#007ac2;color:#fff;cursor:pointer}button:disabled{background:#9ca3af}#status{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:4px;min-height:40px}.field-item{display:flex;gap:7px;align-items:center;margin:5px 0}.field-item input{width:auto;margin:0}.legend-row{display:grid;grid-template-columns:24px 28px 1fr;gap:7px;align-items:start;margin:6px 0;font-size:12px}.swatch{width:21px;height:14px;border:1px solid #555;margin-top:2px}@media(max-width:760px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr}#panel{max-height:48vh;border-right:0;border-bottom:1px solid #ccc}}
+html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif;color:#1f2937}#app{display:grid;grid-template-columns:365px 1fr}#panel{padding:16px;overflow:auto;border-right:1px solid #ccc;background:#fff}#viewDiv{height:100%}h1{font-size:19px;margin:0 0 8px}h2{font-size:15px;margin:18px 0 8px}.small{font-size:12px;color:#5f6b7a}.drop{border:2px dashed #718096;border-radius:8px;padding:14px;text-align:center;background:#f8fafc}input,select,button{box-sizing:border-box;width:100%;margin-top:8px;padding:8px;font-size:13px}button{border:0;border-radius:4px;background:#007ac2;color:#fff;cursor:pointer}button:disabled{background:#9ca3af}#signoutBtn{background:#6b7280}#userInfo{margin-top:8px;background:#f3f4f6;padding:8px;border-radius:4px;line-height:1.5}#status{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:4px;min-height:40px}.field-item{display:flex;gap:7px;align-items:center;margin:5px 0}.field-item input{width:auto;margin:0}.legend-row{display:grid;grid-template-columns:24px 28px 1fr;gap:7px;align-items:start;margin:6px 0;font-size:12px}.swatch{width:21px;height:14px;border:1px solid #555;margin-top:2px}@media(max-width:760px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr}#panel{max-height:48vh;border-right:0;border-bottom:1px solid #ccc}}
 </style>
 </head><body><div id="app"><aside id="panel">
-<h1>ISOXML 処方マップビューア V2</h1>
+<h1>ISOXML 処方マップビューア V3</h1>
 <p class="small">TASKDATA.XML と GRD*.bin をブラウザー内で解析します。</p>
-<label><strong>ベースマップ</strong></label><select id="basemap"><option value="topo-vector">地形図</option><option value="streets-vector">道路</option><option value="hybrid">衛星画像（ハイブリッド）</option></select>
+<h2>ArcGIS Online</h2>
+<button id="signinBtn">ArcGIS Online にサインイン</button>
+<button id="signoutBtn" style="display:none;">サインアウト</button>
+<div id="userInfo" class="small">未ログイン</div>
+<h2>ベースマップ</h2>
+<select id="basemap"><option value="topo-vector">地形図</option><option value="streets-vector">道路</option><option value="hybrid">衛星画像（ハイブリッド）</option></select>
 <div class="drop"><strong>ISOXMLファイルを選択</strong><br><span class="small">XMLとBINをまとめて選択、またはZIP</span><input id="files" type="file" multiple accept=".xml,.bin,.txt,.zip"></div>
 <button id="load">読み込んで表示</button><button id="clear">表示をクリア</button>
 <h2>状態</h2><div id="status">ファイルを選択してください。</div>
@@ -20,12 +25,61 @@ html,body,#app{height:100%;margin:0;font-family:system-ui,sans-serif;color:#1f29
 <h2>TZN凡例</h2><div id="legend"></div>
 </aside><main id="viewDiv"></main></div>
 <script>
-require(["esri/Map","esri/views/MapView","esri/layers/GraphicsLayer","esri/Graphic","esri/geometry/Polygon"],function(ArcGISMap,MapView,GraphicsLayer,Graphic,Polygon){
+require(["esri/Map","esri/views/MapView","esri/layers/GraphicsLayer","esri/Graphic","esri/geometry/Polygon","esri/identity/OAuthInfo","esri/identity/IdentityManager","esri/portal/Portal"],function(ArcGISMap,MapView,GraphicsLayer,Graphic,Polygon,OAuthInfo,esriId,Portal){
 const colors={0:[180,180,180,.22],1:[49,130,189,.72],2:[107,174,214,.72],3:[116,196,118,.72],4:[254,178,76,.76],5:[222,45,38,.76]};
-const layer=new GraphicsLayer({title:"ISOXML Grid"});const map=new ArcGISMap({basemap:"topo-vector",layers:[layer]});const view=new MapView({container:"viewDiv",map:centerMap(),center:[142.06,43.75],zoom:11});
-function centerMap(){return map}
+const layer=new GraphicsLayer({title:"ISOXML Grid"});const map=new ArcGISMap({basemap:"topo-vector",layers:[layer]});const view=new MapView({container:"viewDiv",map:map,center:[142.06,43.75],zoom:11});
 const filesEl=document.getElementById("files"),statusEl=document.getElementById("status"),fieldSelect=document.getElementById("fieldSelect"),zoomBtn=document.getElementById("zoom"),fieldsEl=document.getElementById("fields"),legendEl=document.getElementById("legend");
+const signinBtn=document.getElementById("signinBtn"),signoutBtn=document.getElementById("signoutBtn"),userInfoEl=document.getElementById("userInfo");
 const taskInfo=new globalThis.Map();document.getElementById("basemap").onchange=e=>map.basemap=e.target.value;
+
+// ===== ArcGIS Online OAuth =====
+const PORTAL_URL="https://www.arcgis.com";
+const oauthInfo=new OAuthInfo({appId:"SPru10PuBbIOLtEF",portalUrl:PORTAL_URL,popup:false});
+esriId.registerOAuthInfos([oauthInfo]);
+
+function showSignedIn(portal){
+  const u=portal.user||{};
+  userInfoEl.innerHTML='<b>ログイン中</b><br>'+(u.fullName||"")+'<br>'+(u.username||"")+'<br>'+(portal.name||"");
+  signinBtn.style.display="none";
+  signoutBtn.style.display="";
+}
+function showSignedOut(){
+  userInfoEl.textContent="未ログイン";
+  signinBtn.style.display="";
+  signoutBtn.style.display="none";
+}
+async function loadPortal(){
+  const portal=new Portal({url:PORTAL_URL,authMode:"immediate"});
+  await portal.load();
+  showSignedIn(portal);
+}
+async function checkStatus(){
+  try{
+    await esriId.checkSignInStatus(PORTAL_URL+"/sharing");
+    await loadPortal();
+  }catch(e){
+    showSignedOut();
+  }
+}
+async function signIn(){
+  try{
+    await esriId.getCredential(PORTAL_URL+"/sharing");
+    await loadPortal();
+  }catch(e){
+    console.error(e);
+    userInfoEl.textContent="サインインに失敗しました: "+(e.message||e);
+  }
+}
+function signOut(){
+  esriId.destroyCredentials();
+  showSignedOut();
+  location.reload();
+}
+signinBtn.onclick=signIn;
+signoutBtn.onclick=signOut;
+checkStatus();
+// ===== /ArcGIS Online OAuth =====
+
 const baseName=p=>p.replaceAll("\\","/").split("/").pop().toUpperCase();
 async function collectFiles(files){const fm=new globalThis.Map();for(const file of files){if(file.name.toLowerCase().endsWith(".zip")){const zip=await JSZip.loadAsync(file);for(const [path,item] of Object.entries(zip.files)){if(!item.dir&&/\.(xml|bin|txt)$/i.test(path))fm.set(baseName(path),await item.async("arraybuffer"));}}else if(/\.(xml|bin|txt)$/i.test(file.name))fm.set(baseName(file.name),await file.arrayBuffer());}return fm;}
 function findFile(fm,wanted){const key=wanted.toUpperCase();if(fm.has(key))return fm.get(key);return fm.get(key.replace(/\.(XML|BIN)$/,".TXT"));}
